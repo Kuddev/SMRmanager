@@ -1,0 +1,28 @@
+[package]
+name = "smrmanager"
+version = "0.1.0"
+description = "SMRmanager desktop manager"
+authors = ["SMRmanager Team"]
+edition = "2021"
+
+[lib]
+name = "smrmanager_lib"
+# Windows GNU 调试链路下 cdylib 容易触发 “export ordinal too large”，
+# 本桌面应用开发/打包走 Rust binary 即可，不依赖 cdylib；去掉它可以让 tauri dev 正常热更新。
+crate-type = ["staticlib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+json5 = "0.4"
+toml = "0.8"
+ureq = "2"
+serde_yaml = "0.9"
+
+[profile.dev.build-override]
+opt-level = 2

@@ -1,0 +1,455 @@
+{
+  "schemaVersion": "smrmanager.registry.v1",
+  "updatedAt": "2026-06-22",
+  "registry": {
+    "name": "SMRmanager Community Registry",
+    "repository": "https://github.com/Kuddev/mcp-plugins-registry",
+    "rawUrl": "https://raw.githubusercontent.com/Kuddev/mcp-plugins-registry/main/plugins.json"
+  },
+  "installPolicy": {
+    "discovery": "client-fetches-static-json",
+    "downloadPriority": [
+      "github_release_asset",
+      "github_zipball"
+    ],
+    "manifestFile": "manifest.json",
+    "hashRequiredForCurated": true,
+    "notes": "Release asset 优先；对纯 Skill 仓库允许 zipball fallback，避免依赖用户本机 npm/pip/go 环境。"
+  },
+  "items": [
+    {
+      "id": "skill.trellis",
+      "kind": "skill",
+      "name": "Trellis",
+      "subtitle": "大型功能从想法到合并的设计 / 实施 / 审查工作流",
+      "description": "单个手动调用的 Claude Code / Codex skill，强调可审查的设计文档、实现计划、逐步执行与回顾。",
+      "publisher": "jmfieldman",
+      "repo": {
+        "owner": "jmfieldman",
+        "name": "Trellis",
+        "url": "https://github.com/jmfieldman/Trellis",
+        "defaultRef": "main",
+        "skillPath": "trellis"
+      },
+      "release": {
+        "latestApi": "https://api.github.com/repos/jmfieldman/Trellis/releases/latest",
+        "assetPatterns": [
+          "*.zip",
+          "*.tar.gz"
+        ],
+        "fallbackZipball": "https://api.github.com/repos/jmfieldman/Trellis/zipball/main",
+        "observedStatus": "latest-release-404"
+      },
+      "runtime": [
+        "markdown",
+        "agent-skill"
+      ],
+      "clients": [
+        "Claude Code",
+        "Codex",
+        "Cursor"
+      ],
+      "tags": [
+        "planning",
+        "review",
+        "sprint",
+        "feature"
+      ],
+      "curation": {
+        "level": "featured",
+        "reviewedBy": "SMRmanager",
+        "trust": "source-reviewed"
+      },
+      "icon": {
+        "source": "github_owner_avatar",
+        "url": "https://avatars.githubusercontent.com/u/85181?v=4",
+        "localPreview": "public/skill-icons/github-jmfieldman.png"
+      }
+    },
+    {
+      "id": "skill.openspec",
+      "kind": "skill",
+      "name": "OpenSpec",
+      "subtitle": "轻量级 Spec-driven Development 工作流",
+      "description": "在写代码前先沉淀 proposal、spec、design 与 tasks，适合跨工具 AI 编程流程。",
+      "publisher": "Fission-AI",
+      "repo": {
+        "owner": "Fission-AI",
+        "name": "OpenSpec",
+        "url": "https://github.com/Fission-AI/OpenSpec",
+        "defaultRef": "main",
+        "skillPath": "."
+      },
+      "release": {
+        "latestApi": "https://api.github.com/repos/Fission-AI/OpenSpec/releases/latest",
+        "assetPatterns": [
+          "*.zip",
+          "*.tar.gz",
+          "*windows*.exe"
+        ],
+        "fallbackZipball": "https://api.github.com/repos/Fission-AI/OpenSpec/zipball/main",
+        "observedStatus": "v1.4.1, assets=0"
+      },
+      "runtime": [
+        "typescript",
+        "markdown",
+        "cli"
+      ],
+      "clients": [
+        "Claude Code",
+        "Codex",
+        "Cursor",
+        "Gemini CLI"
+      ],
+      "tags": [
+        "sdd",
+        "spec",
+        "planning",
+        "workflow"
+      ],
+      "curation": {
+        "level": "featured",
+        "reviewedBy": "SMRmanager",
+        "trust": "source-reviewed"
+      },
+      "icon": {
+        "source": "github_repo_asset",
+        "url": "https://raw.githubusercontent.com/Fission-AI/OpenSpec/main/assets/openspec_pixel_light.svg",
+        "localPreview": "public/skill-icons/github-openspec.svg"
+      }
+    },
+    {
+      "id": "skill.grill-me",
+      "kind": "skill",
+      "name": "Grill Me",
+      "subtitle": "上线前的高强度需求拷问",
+      "description": "让 Agent 在动手前围绕计划、设计、边界条件和未知风险连续追问，降低盲写概率。",
+      "publisher": "mattpocock",
+      "repo": {
+        "owner": "mattpocock",
+        "name": "skills",
+        "url": "https://github.com/mattpocock/skills",
+        "defaultRef": "main",
+        "skillPath": "skills/productivity/grill-me"
+      },
+      "release": {
+        "latestApi": "https://api.github.com/repos/mattpocock/skills/releases/latest",
+        "assetPatterns": [
+          "*.zip",
+          "*.tar.gz"
+        ],
+        "fallbackZipball": "https://api.github.com/repos/mattpocock/skills/zipball/main",
+        "observedStatus": "v1.0.1, assets=0"
+      },
+      "runtime": [
+        "markdown",
+        "agent-skill"
+      ],
+      "clients": [
+        "Claude Code",
+        "Codex",
+        "Cursor",
+        "Cline"
+      ],
+      "tags": [
+        "planning",
+        "interview",
+        "requirements",
+        "risk"
+      ],
+      "curation": {
+        "level": "featured",
+        "reviewedBy": "SMRmanager",
+        "trust": "source-reviewed"
+      },
+      "icon": {
+        "source": "github_owner_avatar",
+        "url": "https://avatars.githubusercontent.com/u/28293365?v=4",
+        "localPreview": "public/skill-icons/github-mattpocock.png"
+      }
+    },
+    {
+      "id": "skill.grill-with-docs",
+      "kind": "skill",
+      "name": "Grill With Docs",
+      "subtitle": "拷问需求并同步沉淀领域文档",
+      "description": "在 grill-me 的基础上更新项目领域模型、术语和 ADR，适合多人维护项目。",
+      "publisher": "mattpocock",
+      "repo": {
+        "owner": "mattpocock",
+        "name": "skills",
+        "url": "https://github.com/mattpocock/skills",
+        "defaultRef": "main",
+        "skillPath": "skills/engineering/grill-with-docs"
+      },
+      "release": {
+        "latestApi": "https://api.github.com/repos/mattpocock/skills/releases/latest",
+        "assetPatterns": [
+          "*.zip",
+          "*.tar.gz"
+        ],
+        "fallbackZipball": "https://api.github.com/repos/mattpocock/skills/zipball/main",
+        "observedStatus": "v1.0.1, assets=0"
+      },
+      "runtime": [
+        "markdown",
+        "agent-skill"
+      ],
+      "clients": [
+        "Claude Code",
+        "Codex"
+      ],
+      "tags": [
+        "docs",
+        "domain-model",
+        "adr",
+        "planning"
+      ],
+      "curation": {
+        "level": "recommended",
+        "reviewedBy": "SMRmanager",
+        "trust": "source-reviewed"
+      },
+      "icon": {
+        "source": "github_owner_avatar",
+        "url": "https://avatars.githubusercontent.com/u/28293365?v=4",
+        "localPreview": "public/skill-icons/github-mattpocock.png"
+      }
+    },
+    {
+      "id": "skill.tdd",
+      "kind": "skill",
+      "name": "TDD",
+      "subtitle": "红绿重构的纵向切片开发纪律",
+      "description": "通过测试先行约束 Agent 输出，把功能或修复切成可验证的小步。",
+      "publisher": "mattpocock",
+      "repo": {
+        "owner": "mattpocock",
+        "name": "skills",
+        "url": "https://github.com/mattpocock/skills",
+        "defaultRef": "main",
+        "skillPath": "skills/engineering/tdd"
+      },
+      "release": {
+        "latestApi": "https://api.github.com/repos/mattpocock/skills/releases/latest",
+        "assetPatterns": [
+          "*.zip",
+          "*.tar.gz"
+        ],
+        "fallbackZipball": "https://api.github.com/repos/mattpocock/skills/zipball/main",
+        "observedStatus": "v1.0.1, assets=0"
+      },
+      "runtime": [
+        "markdown",
+        "agent-skill"
+      ],
+      "clients": [
+        "Claude Code",
+        "Codex"
+      ],
+      "tags": [
+        "testing",
+        "quality",
+        "implementation"
+      ],
+      "curation": {
+        "level": "recommended",
+        "reviewedBy": "SMRmanager",
+        "trust": "source-reviewed"
+      },
+      "icon": {
+        "source": "github_owner_avatar",
+        "url": "https://avatars.githubusercontent.com/u/28293365?v=4",
+        "localPreview": "public/skill-icons/github-mattpocock.png"
+      }
+    },
+    {
+      "id": "skill.diagnosing-bugs",
+      "kind": "skill",
+      "name": "Diagnosing Bugs",
+      "subtitle": "复杂 Bug 的复现、最小化、假设与回归闭环",
+      "description": "面向难以复现的问题和性能退化，要求先证据后修复，避免无效试错。",
+      "publisher": "mattpocock",
+      "repo": {
+        "owner": "mattpocock",
+        "name": "skills",
+        "url": "https://github.com/mattpocock/skills",
+        "defaultRef": "main",
+        "skillPath": "skills/engineering/diagnosing-bugs"
+      },
+      "release": {
+        "latestApi": "https://api.github.com/repos/mattpocock/skills/releases/latest",
+        "assetPatterns": [
+          "*.zip",
+          "*.tar.gz"
+        ],
+        "fallbackZipball": "https://api.github.com/repos/mattpocock/skills/zipball/main",
+        "observedStatus": "v1.0.1, assets=0"
+      },
+      "runtime": [
+        "markdown",
+        "agent-skill"
+      ],
+      "clients": [
+        "Claude Code",
+        "Codex"
+      ],
+      "tags": [
+        "debugging",
+        "performance",
+        "regression"
+      ],
+      "curation": {
+        "level": "recommended",
+        "reviewedBy": "SMRmanager",
+        "trust": "source-reviewed"
+      },
+      "icon": {
+        "source": "github_owner_avatar",
+        "url": "https://avatars.githubusercontent.com/u/28293365?v=4",
+        "localPreview": "public/skill-icons/github-mattpocock.png"
+      }
+    },
+    {
+      "id": "skill.codebase-design",
+      "kind": "skill",
+      "name": "Codebase Design",
+      "subtitle": "深模块、接口边界与代码结构设计",
+      "description": "为深模块和干净接口建立设计词汇，减少代码漂移。",
+      "publisher": "mattpocock",
+      "repo": {
+        "owner": "mattpocock",
+        "name": "skills",
+        "url": "https://github.com/mattpocock/skills",
+        "defaultRef": "main",
+        "skillPath": "skills/engineering/codebase-design"
+      },
+      "release": {
+        "latestApi": "https://api.github.com/repos/mattpocock/skills/releases/latest",
+        "assetPatterns": [
+          "*.zip",
+          "*.tar.gz"
+        ],
+        "fallbackZipball": "https://api.github.com/repos/mattpocock/skills/zipball/main",
+        "observedStatus": "v1.0.1, assets=0"
+      },
+      "runtime": [
+        "markdown",
+        "agent-skill"
+      ],
+      "clients": [
+        "Claude Code",
+        "Codex"
+      ],
+      "tags": [
+        "architecture",
+        "design",
+        "refactor"
+      ],
+      "curation": {
+        "level": "recommended",
+        "reviewedBy": "SMRmanager",
+        "trust": "source-reviewed"
+      },
+      "icon": {
+        "source": "github_owner_avatar",
+        "url": "https://avatars.githubusercontent.com/u/28293365?v=4",
+        "localPreview": "public/skill-icons/github-mattpocock.png"
+      }
+    },
+    {
+      "id": "skill.domain-modeling",
+      "kind": "skill",
+      "name": "Domain Modeling",
+      "subtitle": "领域术语、边界场景和 ADR 沉淀",
+      "description": "主动梳理项目术语、边界场景和领域决策。",
+      "publisher": "mattpocock",
+      "repo": {
+        "owner": "mattpocock",
+        "name": "skills",
+        "url": "https://github.com/mattpocock/skills",
+        "defaultRef": "main",
+        "skillPath": "skills/engineering/domain-modeling"
+      },
+      "release": {
+        "latestApi": "https://api.github.com/repos/mattpocock/skills/releases/latest",
+        "assetPatterns": [
+          "*.zip",
+          "*.tar.gz"
+        ],
+        "fallbackZipball": "https://api.github.com/repos/mattpocock/skills/zipball/main",
+        "observedStatus": "v1.0.1, assets=0"
+      },
+      "runtime": [
+        "markdown",
+        "agent-skill"
+      ],
+      "clients": [
+        "Claude Code",
+        "Codex"
+      ],
+      "tags": [
+        "domain-model",
+        "docs",
+        "adr"
+      ],
+      "curation": {
+        "level": "recommended",
+        "reviewedBy": "SMRmanager",
+        "trust": "source-reviewed"
+      },
+      "icon": {
+        "source": "github_owner_avatar",
+        "url": "https://avatars.githubusercontent.com/u/28293365?v=4",
+        "localPreview": "public/skill-icons/github-mattpocock.png"
+      }
+    },
+    {
+      "id": "skill.to-issues",
+      "kind": "skill",
+      "name": "To Issues",
+      "subtitle": "把计划拆成可领取的纵向任务",
+      "description": "把计划、规格或 PRD 拆成可独立领取的纵向任务。",
+      "publisher": "mattpocock",
+      "repo": {
+        "owner": "mattpocock",
+        "name": "skills",
+        "url": "https://github.com/mattpocock/skills",
+        "defaultRef": "main",
+        "skillPath": "skills/engineering/to-issues"
+      },
+      "release": {
+        "latestApi": "https://api.github.com/repos/mattpocock/skills/releases/latest",
+        "assetPatterns": [
+          "*.zip",
+          "*.tar.gz"
+        ],
+        "fallbackZipball": "https://api.github.com/repos/mattpocock/skills/zipball/main",
+        "observedStatus": "v1.0.1, assets=0"
+      },
+      "runtime": [
+        "markdown",
+        "agent-skill"
+      ],
+      "clients": [
+        "Claude Code",
+        "Codex"
+      ],
+      "tags": [
+        "issues",
+        "planning",
+        "team"
+      ],
+      "curation": {
+        "level": "recommended",
+        "reviewedBy": "SMRmanager",
+        "trust": "source-reviewed"
+      },
+      "icon": {
+        "source": "github_owner_avatar",
+        "url": "https://avatars.githubusercontent.com/u/28293365?v=4",
+        "localPreview": "public/skill-icons/github-mattpocock.png"
+      }
+    }
+  ]
+}

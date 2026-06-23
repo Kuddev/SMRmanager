@@ -1,0 +1,10 @@
+/* Tailwind v4 接入 + 现有样式按层拆分；import 顺序即层叠顺序，勿随意调整。 */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "./styles/01-base.css";
+@import "./styles/02-layout.css";
+@import "./styles/03-components.css";
+@import "./styles/04-pages.css";
+@import "./styles/05-theme-dark.css";
+@import "./styles/06-responsive.css";
