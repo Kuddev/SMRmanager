@@ -1,0 +1,67 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0d1430"/>
+      <stop offset="1" stop-color="#070a16"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="512" cy="470" r="430" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2a3a66" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#2a3a66" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wire" x1="300" y1="640" x2="724" y2="640" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="0.5" stop-color="#7c5cfc"/>
+      <stop offset="1" stop-color="#22c6c6"/>
+    </linearGradient>
+    <linearGradient id="cubeTop" x1="394" y1="250" x2="630" y2="370" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5b9bff"/>
+      <stop offset="1" stop-color="#3f7ef0"/>
+    </linearGradient>
+    <linearGradient id="cubeLeft" x1="394" y1="310" x2="512" y2="500" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2f6df6"/>
+      <stop offset="1" stop-color="#1f54d6"/>
+    </linearGradient>
+    <linearGradient id="cubeRight" x1="512" y1="370" x2="630" y2="500" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1f57df"/>
+      <stop offset="1" stop-color="#143fb0"/>
+    </linearGradient>
+    <linearGradient id="nodeBlue" x1="265" y1="665" x2="375" y2="785" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3f86ff"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="nodePurple" x1="457" y1="665" x2="567" y2="785" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8b6dff"/>
+      <stop offset="1" stop-color="#6d4bf0"/>
+    </linearGradient>
+    <linearGradient id="nodeCyan" x1="649" y1="665" x2="759" y2="785" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2fd6d0"/>
+      <stop offset="1" stop-color="#15aeb0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景圆角底 -->
+  <rect x="32" y="32" width="960" height="960" rx="232" fill="url(#bg)"/>
+  <rect x="32" y="32" width="960" height="960" rx="232" fill="url(#glow)"/>
+  <rect x="33.5" y="33.5" width="957" height="957" rx="230.5" fill="none" stroke="#3a4a86" stroke-opacity="0.35" stroke-width="3"/>
+
+  <!-- 连线（蓝→紫→青渐变） -->
+  <g stroke="url(#wire)" stroke-width="18" stroke-linecap="round" fill="none">
+    <path d="M512 478 L512 600"/>
+    <path d="M320 600 L704 600"/>
+    <path d="M320 600 L320 672"/>
+    <path d="M512 600 L512 672"/>
+    <path d="M704 600 L704 672"/>
+  </g>
+
+  <!-- 顶部 3D 立方体 -->
+  <g stroke="#0c1330" stroke-width="6" stroke-linejoin="round">
+    <path d="M512 236 L632 306 L512 376 L392 306 Z" fill="url(#cubeTop)"/>
+    <path d="M392 306 L512 376 L512 500 L392 430 Z" fill="url(#cubeLeft)"/>
+    <path d="M632 306 L512 376 L512 500 L632 430 Z" fill="url(#cubeRight)"/>
+  </g>
+
+  <!-- 底部三个节点 -->
+  <rect x="262" y="664" width="116" height="116" rx="30" fill="url(#nodeBlue)" stroke="#0c1330" stroke-width="5"/>
+  <rect x="454" y="664" width="116" height="116" rx="30" fill="url(#nodePurple)" stroke="#0c1330" stroke-width="5"/>
+  <rect x="646" y="664" width="116" height="116" rx="30" fill="url(#nodeCyan)" stroke="#0c1330" stroke-width="5"/>
+</svg>

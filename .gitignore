@@ -1,0 +1,16 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+.codex-backups/
+.codex-runlogs/
+.codex-vendor/
+preview*.png
+preview*.html
+breathable-preview.html
+src/preview-icons.js
+public/client-icons/_vscode_zip/
+public/client-icons/*.zip
+*.log
+.DS_Store
+Thumbs.db

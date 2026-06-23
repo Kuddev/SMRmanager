@@ -1,0 +1,143 @@
+@layer components {
+:root {
+  color: #111827;
+  background: #f5f7fb;
+  font-family:
+    Inter, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont,
+    "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  --primary: #5865f2;
+  --primary-strong: #4050e6;
+  --primary-soft: #eef0ff;
+  --line: rgba(148, 163, 184, 0.22);
+  --line-strong: rgba(148, 163, 184, 0.36);
+  --text: #111827;
+  --muted: #667085;
+  --subtle: #94a3b8;
+  --app-bg: #f5f7fb;
+  --shell-bg:
+    radial-gradient(circle at 72% 12%, rgba(88, 101, 242, 0.08), transparent 32%),
+    linear-gradient(135deg, #ffffff, #f8fafc);
+  --sidebar-bg: linear-gradient(180deg, #ffffff, #f8fafc);
+  --panel: #ffffff;
+  --panel-strong: #ffffff;
+  --control-bg: #ffffff;
+  --card-bg: #ffffff;
+  --shadow: none;
+}
+
+:root[data-theme="dark"] {
+  color: #e5e7eb;
+  background: #0f172a;
+  --primary: #7c8cff;
+  --primary-strong: #6673ff;
+  --primary-soft: rgba(124, 140, 255, 0.16);
+  --line: rgba(148, 163, 184, 0.18);
+  --line-strong: rgba(148, 163, 184, 0.28);
+  --text: #e5e7eb;
+  --muted: #9aa7bd;
+  --subtle: #64748b;
+  --app-bg: #0f172a;
+  --shell-bg:
+    radial-gradient(circle at 76% 10%, rgba(88, 101, 242, 0.18), transparent 32%),
+    linear-gradient(135deg, #0f172a, #111827);
+  --sidebar-bg: linear-gradient(180deg, #111827, #0f172a);
+  --panel: #111827;
+  --panel-strong: #172033;
+  --control-bg: #172033;
+  --card-bg: #101827;
+  --shadow: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--app-bg);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+button {
+  border: 0;
+  font: inherit;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
+.app-shell {
+  position: relative;
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: var(--shell-bg);
+  box-shadow: var(--shadow);
+}
+
+.window-bar {
+  position: absolute;
+  z-index: 20;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 48px;
+  display: flex;
+  justify-content: flex-end;
+  app-region: drag;
+}
+
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  app-region: no-drag;
+}
+
+.window-button {
+  display: grid;
+  width: 34px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
+}
+
+.window-button:hover {
+  color: var(--text);
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.window-button.close:hover {
+  color: #ffffff;
+  background: #ef4444;
+}
+
+}
