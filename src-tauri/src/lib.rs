@@ -8,8 +8,15 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             detection::detect_environment,
             detection::list_wsl_distros,
+            detection::wsl_set_default,
+            detection::wsl_terminate,
+            detection::wsl_start,
+            detection::wsl_open_terminal,
             detection::delete_skills,
             detection::transfer_skills,
+            detection::adopt_skills_to_library,
+            detection::link_skill_to_clients,
+            detection::unlink_skill_from_clients,
             detection::import_skill,
             detection::install_mcp_server,
             detection::set_mcp_enabled,
@@ -21,6 +28,8 @@ pub fn run() {
             detection::open_path,
             installer::install_market_skill,
             installer::check_global_packages,
+            installer::git_inspect,
+            installer::git_apply,
             updates::check_app_update,
         ])
         .run(tauri::generate_context!())

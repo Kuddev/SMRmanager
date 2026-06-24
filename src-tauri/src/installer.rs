@@ -426,3 +426,281 @@ pub fn check_global_packages(packages: Vec<String>) -> Vec<String> {
     }
     installed
 }
+
+// ===== 从 Git 安装 Skill / MCP =====
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitSkillEntry {
+    pub rel_path: String,
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitMcpEntry {
+    pub name: String,
+    pub transport: String,
+    pub command: Option<String>,
+    pub args: Option<Vec<String>>,
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitInspectResult {
+    pub cache_path: String,
+    pub skills: Vec<GitSkillEntry>,
+    pub mcp_servers: Vec<GitMcpEntry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitApplyResult {
+    pub skills_installed: usize,
+    pub mcp_installed: usize,
+    pub failed: Vec<String>,
+    pub message: String,
+}
+
+fn parse_skill_md(skill_md: &Path, fallback: &str) -> (String, String) {
+    let content = std::fs::read_to_string(skill_md).unwrap_or_default();
+    let trimmed = content.trim_start_matches('\u{feff}');
+    let mut name = fallback.to_string();
+    let mut description = String::new();
+    if trimmed.starts_with("---") {
+        let mut parts = trimmed.splitn(3, "---");
+        let _ = parts.next();
+        if let Some(front) = parts.next() {
+            for line in front.lines() {
+                if let Some((k, v)) = line.split_once(':') {
+                    let v = v.trim().trim_matches('"').trim_matches('\'').to_string();
+                    match k.trim() {
+                        "name" if !v.is_empty() => name = v,
+                        "description" if !v.is_empty() => description = v,
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    (name, description)
+}
+
+fn scan_git_skills(dir: &Path, base: &Path, depth: usize, out: &mut Vec<GitSkillEntry>) {
+    if depth > 3 || out.len() > 200 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') || name == "node_modules" {
+            continue;
+        }
+        let skill_md = path.join("SKILL.md");
+        if skill_md.is_file() {
+            let rel = path
+                .strip_prefix(base)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let (n, d) = parse_skill_md(&skill_md, &name);
+            out.push(GitSkillEntry { rel_path: rel, name: n, description: d });
+            continue; // 不深入 skill 内部
+        }
+        scan_git_skills(&path, base, depth + 1, out);
+    }
+}
+
+fn scan_git_mcp(root: &Path) -> Vec<GitMcpEntry> {
+    let candidates = [
+        root.join("mcp.json"),
+        root.join(".mcp.json"),
+        root.join("server.json"),
+        root.join(".vscode").join("mcp.json"),
+        root.join(".cursor").join("mcp.json"),
+        root.join("package.json"),
+    ];
+    let mut out = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for file in candidates {
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        let Ok(json) = serde_json::from_str::<Value>(&text) else {
+            continue;
+        };
+        let servers = json
+            .get("mcpServers")
+            .or_else(|| json.get("mcp").and_then(|m| m.get("servers")));
+        let Some(obj) = servers.and_then(Value::as_object) else {
+            continue;
+        };
+        for (name, spec) in obj {
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            let command = spec.get("command").and_then(Value::as_str).map(String::from);
+            let url = spec.get("url").and_then(Value::as_str).map(String::from);
+            let args = spec.get("args").and_then(Value::as_array).map(|a| {
+                a.iter().filter_map(|v| v.as_str().map(String::from)).collect::<Vec<String>>()
+            });
+            let transport = if url.is_some() { "http".to_string() } else { "stdio".to_string() };
+            out.push(GitMcpEntry { name: name.clone(), transport, command, args, url });
+        }
+    }
+    out
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn git_inspect(url: String, subdir: Option<String>) -> Result<GitInspectResult, String> {
+    let url = url.trim().to_string();
+    if url.is_empty() {
+        return Err("请填写 Git 仓库地址".to_string());
+    }
+    let git = find_tool(&["git"]).ok_or_else(|| "未找到 git，请先安装 Git".to_string())?;
+    let clone_dir = cache_dir().join(format!("git-{}", safe_segment(&url)));
+    if clone_dir.exists() {
+        let _ = std::fs::remove_dir_all(&clone_dir);
+    }
+    std::fs::create_dir_all(cache_dir()).map_err(|e| format!("创建缓存目录失败: {e}"))?;
+    let args = vec![
+        "clone".into(),
+        "--depth".into(),
+        "1".into(),
+        github_url(&url),
+        path_to_string(&clone_dir),
+    ];
+    let (ok, log) = run_tool(&git, &args, None)?;
+    if !ok {
+        return Err(format!("克隆失败:\n{log}"));
+    }
+    let root = match &subdir {
+        Some(s) if !s.trim().is_empty() => safe_join(&clone_dir, s.trim())?,
+        _ => clone_dir.clone(),
+    };
+    if !root.is_dir() {
+        return Err("指定的子目录不存在".to_string());
+    }
+    let mut skills = Vec::new();
+    scan_git_skills(&root, &root, 0, &mut skills);
+    let mcp_servers = scan_git_mcp(&root);
+    Ok(GitInspectResult {
+        cache_path: path_to_string(&root),
+        skills,
+        mcp_servers,
+    })
+}
+
+fn git_library_skills_dir() -> PathBuf {
+    home_dir().join(".smrmanager").join("library").join("skills")
+}
+
+fn unique_dest(root: &Path, name: &str) -> PathBuf {
+    let base = if name.trim().is_empty() { "skill" } else { name };
+    let mut target = root.join(base);
+    if !target.exists() {
+        return target;
+    }
+    let mut idx = 2usize;
+    loop {
+        target = root.join(format!("{base}-{idx}"));
+        if !target.exists() {
+            return target;
+        }
+        idx += 1;
+    }
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn git_apply(
+    cache_path: String,
+    skill_rel_paths: Vec<String>,
+    skill_target: String,
+    mcp_servers: Vec<GitMcpEntry>,
+    mcp_client_id: String,
+) -> Result<GitApplyResult, String> {
+    let root = PathBuf::from(&cache_path);
+    let mut failed = Vec::new();
+    let mut skills_installed = 0usize;
+
+    if !skill_rel_paths.is_empty() {
+        let dest_root = if skill_target == "library" {
+            git_library_skills_dir()
+        } else {
+            crate::detection::client_skill_root(&skill_target)
+                .ok_or_else(|| "目标客户端不支持写入 Skills".to_string())?
+        };
+        std::fs::create_dir_all(&dest_root).map_err(|e| format!("创建目标目录失败: {e}"))?;
+        for rel in &skill_rel_paths {
+            let src = match safe_join(&root, rel) {
+                Ok(p) => p,
+                Err(e) => {
+                    failed.push(e);
+                    continue;
+                }
+            };
+            if !src.is_dir() {
+                failed.push(format!("{rel}: 源不存在"));
+                continue;
+            }
+            let leaf = Path::new(rel).file_name().and_then(|n| n.to_str()).unwrap_or("skill");
+            let dest = unique_dest(&dest_root, leaf);
+            match copy_dir_recursive(&src, &dest) {
+                Ok(_) => skills_installed += 1,
+                Err(e) => failed.push(format!("{rel}: {e}")),
+            }
+        }
+    }
+
+    let mut mcp_installed = 0usize;
+    if !mcp_servers.is_empty() && !mcp_client_id.trim().is_empty() {
+        // 持久化 clone 源，命令里的相对路径据此解析为绝对路径。
+        let persist = home_dir()
+            .join(".smrmanager")
+            .join("mcp-sources")
+            .join(safe_segment(root.file_name().and_then(|n| n.to_str()).unwrap_or("src")));
+        if !persist.exists() {
+            let _ = copy_dir_recursive(&root, &persist);
+        }
+        for entry in mcp_servers {
+            let args = entry.args.map(|list| {
+                list.into_iter()
+                    .map(|a| {
+                        let resolved = persist.join(&a);
+                        if PathBuf::from(&a).is_relative() && resolved.exists() {
+                            path_to_string(&resolved)
+                        } else {
+                            a
+                        }
+                    })
+                    .collect::<Vec<String>>()
+            });
+            let spec = crate::detection::McpServerSpec {
+                name: entry.name.clone(),
+                transport: entry.transport,
+                command: entry.command,
+                args,
+                url: entry.url,
+            };
+            match crate::detection::install_mcp_server(mcp_client_id.clone(), spec) {
+                Ok(_) => mcp_installed += 1,
+                Err(e) => failed.push(format!("MCP {}: {e}", entry.name)),
+            }
+        }
+    }
+
+    Ok(GitApplyResult {
+        message: format!("已安装 {skills_installed} 个 Skill、{mcp_installed} 个 MCP"),
+        skills_installed,
+        mcp_installed,
+        failed,
+    })
+}

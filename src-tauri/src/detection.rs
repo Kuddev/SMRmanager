@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::UNIX_EPOCH;
@@ -71,6 +72,8 @@ pub struct DetectedSkill {
     pub managed: bool,
     pub updated_at: Option<String>,
     pub tags: Vec<String>,
+    pub linked: bool,
+    pub linked_clients: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -742,12 +745,8 @@ fn summarize_mcp_server(
 
 fn extra_skill_roots() -> Vec<PathBuf> {
     let home = home_dir();
-    vec![
-        home.join(".cc-switch").join("skills"),
-        home.join(".agents").join("skills"),
-        home.join(".codex").join("skills"),
-        home.join(".gemini").join("skills"),
-    ]
+    // 仅收录“非客户端目录”的通用 skill 位置；.codex/.gemini 已是客户端目录，不再当共享。
+    vec![home.join(".agents").join("skills")]
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -848,6 +847,34 @@ fn parse_skill_meta(skill_md: &Path, fallback: &str) -> (String, Option<String>,
     )
 }
 
+fn extract_skill(
+    path: &Path,
+    dir_name: String,
+    client_id: &str,
+    client_name: &str,
+    managed: bool,
+) -> Option<DetectedSkill> {
+    let skill_md = path.join("SKILL.md");
+    if !skill_md.is_file() {
+        return None;
+    }
+    let (name, description, tags) = parse_skill_meta(&skill_md, &dir_name);
+    let updated_at = timestamp_for_paths(&[skill_md.clone(), path.to_path_buf()]);
+    Some(DetectedSkill {
+        directory: dir_name,
+        name,
+        description,
+        client_id: client_id.to_string(),
+        client_name: client_name.to_string(),
+        path: path_to_string(path),
+        managed,
+        updated_at,
+        tags,
+        linked: false,
+        linked_clients: Vec::new(),
+    })
+}
+
 fn scan_skill_dir(dir: &Path, client_id: &str, client_name: &str, managed: bool) -> Vec<DetectedSkill> {
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -863,52 +890,74 @@ fn scan_skill_dir(dir: &Path, client_id: &str, client_name: &str, managed: bool)
         if dir_name.starts_with('.') {
             continue;
         }
-        let skill_md = path.join("SKILL.md");
-        if !skill_md.is_file() {
-            continue;
+        if let Some(skill) = extract_skill(&path, dir_name, client_id, client_name, managed) {
+            out.push(skill);
         }
-        let (name, description, tags) = parse_skill_meta(&skill_md, &dir_name);
-        let updated_at = timestamp_for_paths(&[skill_md.clone(), path.clone()]);
-        out.push(DetectedSkill {
-            directory: dir_name,
-            name,
-            description,
-            client_id: client_id.to_string(),
-            client_name: client_name.to_string(),
-            path: path_to_string(&path),
-            managed,
-            updated_at,
-            tags,
-        });
     }
 
     out
 }
 
 fn collect_skills(definitions: &[ClientDefinition]) -> Vec<DetectedSkill> {
-    let mut skills = Vec::new();
-    let mut seen = BTreeSet::new();
+    // 按规范化路径全局去重：同一目录被多处扫到时只保留一次（优先级 库 > 客户端 > 共享）。
+    let mut seen_paths: BTreeSet<PathBuf> = BTreeSet::new();
 
+    // 1. 中心库（单一真相源）
+    let mut library_skills = scan_skill_dir(&library_skills_dir(), "library", "中心库", true);
+    let mut lib_index: BTreeMap<PathBuf, usize> = BTreeMap::new();
+    for (idx, skill) in library_skills.iter().enumerate() {
+        let canon = canonical_or_original(Path::new(&skill.path));
+        lib_index.insert(canon.clone(), idx);
+        seen_paths.insert(canon);
+    }
+
+    let mut client_skills: Vec<DetectedSkill> = Vec::new();
+
+    // 2. 客户端目录：指向库的 junction → 记为绑定（回填库 skill 的 linked_clients）；其余为普通 skill
     for definition in definitions {
         for dir in &definition.skill_dirs {
-            for skill in scan_skill_dir(dir, &definition.id, &definition.name, false) {
-                let key = format!("{}:{}", skill.client_id, skill.path);
-                if seen.insert(key) {
-                    skills.push(skill);
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let dir_name = entry.file_name().to_string_lossy().to_string();
+                if dir_name.starts_with('.') {
+                    continue;
+                }
+                if is_junction(&path) {
+                    if let Some(&idx) = lib_index.get(&canonical_or_original(&path)) {
+                        let cid = definition.id.clone();
+                        if !library_skills[idx].linked_clients.contains(&cid) {
+                            library_skills[idx].linked_clients.push(cid);
+                        }
+                        continue;
+                    }
+                }
+                if let Some(skill) = extract_skill(&path, dir_name, &definition.id, &definition.name, false) {
+                    if seen_paths.insert(canonical_or_original(&path)) {
+                        client_skills.push(skill);
+                    }
                 }
             }
         }
     }
 
+    // 3. extra_skill_roots（通用 skill 目录，如 .agents）
     for dir in extra_skill_roots() {
         for skill in scan_skill_dir(&dir, "shared", "共享 Skills", true) {
-            let key = format!("{}:{}", skill.client_id, skill.path);
-            if seen.insert(key) {
-                skills.push(skill);
+            if seen_paths.insert(canonical_or_original(Path::new(&skill.path))) {
+                client_skills.push(skill);
             }
         }
     }
 
+    // 库 skill 置顶，其后是客户端/共享 skill
+    let mut skills = library_skills;
+    skills.extend(client_skills);
     skills
 }
 
@@ -1194,6 +1243,48 @@ fn safe_trash_name(value: &str) -> String {
     }
 }
 
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+fn library_skills_dir() -> PathBuf {
+    home_dir().join(".smrmanager").join("library").join("skills")
+}
+
+// 是否为 junction / symlink（reparse point）。Rust 的 FileType::is_symlink() 对 junction 返回 false，须查属性位。
+fn is_junction(path: &Path) -> bool {
+    std::fs::symlink_metadata(path)
+        .map(|meta| meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+        .unwrap_or(false)
+}
+
+// 创建目录联接（junction，免管理员）；失败回退绝对 symlink。
+fn create_junction(link: &Path, source: &Path) -> Result<(), String> {
+    if link.exists() || is_junction(link) {
+        return Err(format!("目标已存在: {}", path_to_string(link)));
+    }
+    if let Some(parent) = link.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("创建父目录失败 {}: {e}", path_to_string(parent)))?;
+    }
+    let output = Command::new("cmd")
+        .args(["/c", "mklink", "/J"])
+        .arg(link)
+        .arg(source)
+        .output();
+    if let Ok(out) = output {
+        if out.status.success() {
+            return Ok(());
+        }
+    }
+    // 回退：绝对路径 symlink（需开发者模式/管理员）。
+    std::os::windows::fs::symlink_dir(source, link)
+        .map_err(|e| format!("创建链接失败（junction 与 symlink 均失败）: {e}"))
+}
+
+// 仅移除链接本身。严禁用 remove_dir_all——那会穿透删除库源。
+fn remove_link(path: &Path) -> Result<(), String> {
+    std::fs::remove_dir(path).map_err(|e| format!("移除链接失败 {}: {e}", path_to_string(path)))
+}
+
 fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), String> {
     std::fs::create_dir_all(to).map_err(|e| format!("创建目录失败 {}: {e}", path_to_string(to)))?;
     for entry in std::fs::read_dir(from).map_err(|e| format!("读取目录失败 {}: {e}", path_to_string(from)))? {
@@ -1265,9 +1356,11 @@ pub struct WslDistro {
     pub distro: String,
     pub user: String,
     pub home_unc: String,
+    pub running: bool,
+    pub is_default: bool,
 }
 
-// wsl.exe -l -q 的输出是 UTF-16LE，需手动解码。
+// wsl.exe 的列表输出是 UTF-16LE，需手动解码。
 fn decode_utf16le(bytes: &[u8]) -> String {
     let units: Vec<u16> = bytes
         .chunks_exact(2)
@@ -1279,7 +1372,7 @@ fn decode_utf16le(bytes: &[u8]) -> String {
 #[tauri::command]
 pub fn list_wsl_distros() -> Result<Vec<WslDistro>, String> {
     let output = Command::new("wsl.exe")
-        .args(["-l", "-q"])
+        .args(["-l", "-v"])
         .output()
         .map_err(|e| format!("无法调用 wsl.exe（可能未安装 WSL）：{e}"))?;
     if !output.status.success() {
@@ -1288,37 +1381,105 @@ pub fn list_wsl_distros() -> Result<Vec<WslDistro>, String> {
     let listing = decode_utf16le(&output.stdout);
     let mut distros = Vec::new();
     for raw in listing.lines() {
-        let name = raw
-            .trim()
-            .trim_matches('\u{feff}')
-            .trim_matches('\u{0}')
-            .trim();
-        if name.is_empty() {
+        // 清掉穿插的 NUL/BOM，再按列解析： [*] NAME STATE VERSION
+        let line: String = raw.chars().filter(|c| *c != '\u{0}' && *c != '\u{feff}').collect();
+        if line.trim().is_empty() {
             continue;
         }
-        // 取该发行版的 $HOME（Linux 命令输出为 UTF-8）。
-        let home = Command::new("wsl.exe")
-            .args(["-d", name, "--", "sh", "-c", "echo $HOME"])
-            .output()
-            .ok()
-            .and_then(|out| {
-                if out.status.success() {
-                    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-                } else {
-                    None
-                }
-            })
-            .filter(|h| h.starts_with('/'))
-            .unwrap_or_else(|| "/root".to_string());
-        let user = home.rsplit('/').next().unwrap_or("").to_string();
-        let home_unc = format!("\\\\wsl.localhost\\{}{}", name, home.replace('/', "\\"));
+        let is_default = line.trim_start().starts_with('*');
+        let rest = line.trim_start().trim_start_matches('*').trim_start();
+        let mut tokens = rest.split_whitespace();
+        let Some(name) = tokens.next() else {
+            continue;
+        };
+        if name.eq_ignore_ascii_case("NAME") {
+            continue; // 表头
+        }
+        let state = tokens.next().unwrap_or("");
+        let running = state.eq_ignore_ascii_case("Running");
+
+        // 仅对运行中的发行版取 $HOME（避免为读路径而唤醒已停止的发行版）。
+        let (user, home_unc) = if running {
+            let home = Command::new("wsl.exe")
+                .args(["-d", name, "--", "sh", "-c", "echo $HOME"])
+                .output()
+                .ok()
+                .and_then(|out| {
+                    if out.status.success() {
+                        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+                    } else {
+                        None
+                    }
+                })
+                .filter(|h| h.starts_with('/'))
+                .unwrap_or_else(|| "/root".to_string());
+            let user = home.rsplit('/').next().unwrap_or("").to_string();
+            let unc = format!("\\\\wsl.localhost\\{}{}", name, home.replace('/', "\\"));
+            (user, unc)
+        } else {
+            (String::new(), String::new())
+        };
+
         distros.push(WslDistro {
             distro: name.to_string(),
             user,
             home_unc,
+            running,
+            is_default,
         });
     }
     Ok(distros)
+}
+
+fn wsl_command_ok(args: &[&str]) -> Result<(), String> {
+    let out = Command::new("wsl.exe")
+        .args(args)
+        .output()
+        .map_err(|e| format!("调用 wsl.exe 失败: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        let msg = decode_utf16le(&out.stderr);
+        let msg = msg.trim();
+        Err(if msg.is_empty() {
+            "wsl.exe 命令失败".to_string()
+        } else {
+            msg.to_string()
+        })
+    }
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn wsl_set_default(distro: String) -> Result<(), String> {
+    wsl_command_ok(&["--set-default", &distro])
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn wsl_terminate(distro: String) -> Result<(), String> {
+    wsl_command_ok(&["--terminate", &distro])
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn wsl_start(distro: String) -> Result<(), String> {
+    // 运行任意命令即可拉起该发行版。
+    Command::new("wsl.exe")
+        .args(["-d", &distro, "--", "true"])
+        .output()
+        .map_err(|e| format!("启动失败: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn wsl_open_terminal(distro: String) -> Result<(), String> {
+    // 优先 Windows Terminal，回退 cmd start wsl。
+    if Command::new("wt.exe").args(["-d", &distro]).spawn().is_ok() {
+        return Ok(());
+    }
+    Command::new("cmd")
+        .args(["/c", "start", "", "wsl.exe", "-d", &distro])
+        .spawn()
+        .map_err(|e| format!("打开终端失败: {e}"))?;
+    Ok(())
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -1469,6 +1630,186 @@ pub fn import_skill(source_dir: String, target_client_id: String) -> Result<Impo
     })
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryOpResult {
+    pub ok: usize,
+    pub failed: Vec<String>,
+    pub message: String,
+}
+
+// 移除所有 Windows 客户端里指向某库 skill 的 junction（按 canonical 目标匹配）。
+fn unlink_library_skill_links(source_canonical: &Path) {
+    for def in client_definitions() {
+        for root in &def.skill_dirs {
+            let Ok(entries) = std::fs::read_dir(root) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if is_junction(&path) && canonical_or_original(&path) == *source_canonical {
+                    let _ = remove_link(&path);
+                }
+            }
+        }
+    }
+}
+
+// 收编：把客户端现有 skill 移入中心库，并在原位建 junction 指回库（真·单一源）。
+#[tauri::command(rename_all = "camelCase")]
+pub fn adopt_skills_to_library(
+    paths: Vec<String>,
+    extra_roots: Vec<ExtraRoot>,
+) -> Result<LibraryOpResult, String> {
+    let definitions = definitions_with_extra_roots(&extra_roots);
+    let allowed = build_allowed_skill_map(&definitions);
+    let lib_dir = library_skills_dir();
+    std::fs::create_dir_all(&lib_dir).map_err(|e| format!("创建中心库目录失败: {e}"))?;
+
+    let mut ok = 0usize;
+    let mut failed = Vec::new();
+    for raw in paths {
+        let requested = PathBuf::from(&raw);
+        if is_junction(&requested) {
+            failed.push(format!("{raw}：已是链接，无需收编"));
+            continue;
+        }
+        if raw.starts_with("\\\\") {
+            failed.push(format!("{raw}：WSL/UNC 来源暂不支持收编进库"));
+            continue;
+        }
+        let Ok(canonical) = requested.canonicalize() else {
+            failed.push(format!("{raw}：路径不存在"));
+            continue;
+        };
+        let Some(skill) = allowed.get(&canonical) else {
+            failed.push(format!("{raw}：不在已检测 Skill 范围内"));
+            continue;
+        };
+        if skill.client_id == "library" || skill.managed {
+            failed.push(format!("{}：已在中心库/共享目录中", skill.name));
+            continue;
+        }
+        let dest = unique_skill_destination(&lib_dir, &skill.directory);
+        // 移动：先 rename，跨卷失败回退 复制+删源。
+        let moved = match std::fs::rename(&canonical, &dest) {
+            Ok(_) => Ok(()),
+            Err(_) => copy_dir_recursive(&canonical, &dest)
+                .and_then(|_| std::fs::remove_dir_all(&canonical).map_err(|e| format!("移除源目录失败: {e}"))),
+        };
+        if let Err(e) = moved {
+            failed.push(format!("{}：移动入库失败 {e}", skill.name));
+            continue;
+        }
+        // 原位建 junction 指回库；失败则回滚。
+        match create_junction(&requested, &dest) {
+            Ok(_) => ok += 1,
+            Err(e) => {
+                let _ = std::fs::rename(&dest, &canonical);
+                failed.push(format!("{}：建链接失败，已回滚 {e}", skill.name));
+            }
+        }
+    }
+    Ok(LibraryOpResult {
+        ok,
+        failed,
+        message: format!("已收编 {ok} 个 Skill 进中心库"),
+    })
+}
+
+// 链接：把库 skill 以 junction 形式链接到指定 Windows 客户端。
+#[tauri::command(rename_all = "camelCase")]
+pub fn link_skill_to_clients(
+    library_skill_path: String,
+    client_ids: Vec<String>,
+) -> Result<LibraryOpResult, String> {
+    let source = PathBuf::from(&library_skill_path);
+    let lib_canonical = canonical_or_original(&library_skills_dir());
+    let source_canonical = canonical_or_original(&source);
+    if !source_canonical.starts_with(&lib_canonical) {
+        return Err("只能链接中心库内的 Skill".to_string());
+    }
+    if !source.is_dir() {
+        return Err("库 Skill 不存在".to_string());
+    }
+    let definitions = client_definitions();
+    let dir_name = source
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("skill")
+        .to_string();
+    let mut ok = 0usize;
+    let mut failed = Vec::new();
+    for cid in client_ids {
+        let Some(def) = definitions.iter().find(|d| d.id == cid) else {
+            failed.push(format!("{cid}：未知客户端"));
+            continue;
+        };
+        let Some(root) = def.skill_dirs.first() else {
+            failed.push(format!("{}：无可写入 Skills 目录", def.name));
+            continue;
+        };
+        let link = root.join(&dir_name);
+        if link.exists() || is_junction(&link) {
+            if is_junction(&link) && canonical_or_original(&link) == source_canonical {
+                ok += 1; // 已链接，幂等
+            } else {
+                failed.push(format!("{}：已存在同名 {dir_name}", def.name));
+            }
+            continue;
+        }
+        match create_junction(&link, &source) {
+            Ok(_) => ok += 1,
+            Err(e) => failed.push(format!("{}：{e}", def.name)),
+        }
+    }
+    Ok(LibraryOpResult {
+        ok,
+        failed,
+        message: format!("已链接到 {ok} 个客户端"),
+    })
+}
+
+// 解链：移除指定客户端里指向该库 skill 的 junction（不删库源）。
+#[tauri::command(rename_all = "camelCase")]
+pub fn unlink_skill_from_clients(
+    library_skill_path: String,
+    client_ids: Vec<String>,
+) -> Result<LibraryOpResult, String> {
+    let source_canonical = canonical_or_original(&PathBuf::from(&library_skill_path));
+    let definitions = client_definitions();
+    let dir_name = PathBuf::from(&library_skill_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("skill")
+        .to_string();
+    let mut ok = 0usize;
+    let mut failed = Vec::new();
+    for cid in client_ids {
+        let Some(def) = definitions.iter().find(|d| d.id == cid) else {
+            failed.push(format!("{cid}：未知客户端"));
+            continue;
+        };
+        let Some(root) = def.skill_dirs.first() else {
+            continue;
+        };
+        let link = root.join(&dir_name);
+        if is_junction(&link) && canonical_or_original(&link) == source_canonical {
+            match remove_link(&link) {
+                Ok(_) => ok += 1,
+                Err(e) => failed.push(format!("{}：{e}", def.name)),
+            }
+        } else {
+            failed.push(format!("{}：未找到指向库的链接", def.name));
+        }
+    }
+    Ok(LibraryOpResult {
+        ok,
+        failed,
+        message: format!("已从 {ok} 个客户端移除链接"),
+    })
+}
+
 #[tauri::command]
 pub fn delete_skills(paths: Vec<String>) -> Result<DeleteSkillsResult, String> {
     let definitions = client_definitions();
@@ -1485,6 +1826,17 @@ pub fn delete_skills(paths: Vec<String>) -> Result<DeleteSkillsResult, String> {
 
     for raw in paths {
         let requested = PathBuf::from(&raw);
+        // junction：仅移除链接本身，绝不 canonicalize 解析到库源去删（核心安全点）。
+        if is_junction(&requested) {
+            match remove_link(&requested) {
+                Ok(_) => {
+                    deleted += 1;
+                    moved_to_trash.push(format!("{raw}（已移除链接，未删库源）"));
+                }
+                Err(error) => failed.push(format!("{raw}：{error}")),
+            }
+            continue;
+        }
         let Ok(canonical) = requested.canonicalize() else {
             failed.push(format!("{raw}：路径不存在"));
             continue;
@@ -1493,6 +1845,11 @@ pub fn delete_skills(paths: Vec<String>) -> Result<DeleteSkillsResult, String> {
             failed.push(format!("{raw}：不在已检测 Skill 范围内，已拒绝删除"));
             continue;
         };
+
+        // 删库 skill：先移除所有客户端里指向它的 junction，避免悬空链接。
+        if skill.client_id == "library" {
+            unlink_library_skill_links(&canonical);
+        }
 
         let leaf = format!(
             "{}-{}-{}",

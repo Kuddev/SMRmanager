@@ -791,6 +791,222 @@
   font-size: 13px;
 }
 
+/* —— 中心库 / junction 链接 —— */
+.skill-lib-pill {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.skill-linked-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.skill-linked-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.skill-linked-chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(88, 101, 242, 0.4);
+  color: var(--primary);
+  background: var(--primary-soft);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.skill-linked-empty {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.skill-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.link-client-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.link-client-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.link-client-name {
+  flex: 1;
+  color: var(--text);
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.link-client-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* —— WSL 管理页 —— */
+.nav-beta {
+  margin-left: auto;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: rgba(88, 101, 242, 0.18);
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.wsl-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.wsl-status-dot.running {
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+}
+.wsl-status-dot.stopped {
+  background: #9ca3af;
+}
+
+.wsl-default-tag {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.wsl-help-link {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: none;
+}
+.wsl-help-link:hover {
+  color: var(--primary);
+}
+
+.wsl-avatar {
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+}
+
+.wsl-sub {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.wsl-skill-row {
+  grid-template-columns: 48px minmax(0, 1fr) minmax(120px, 160px) auto;
+  cursor: pointer;
+}
+.wsl-skill-row.is-selected {
+  border-color: rgba(88, 101, 242, 0.45);
+  background: var(--primary-soft);
+}
+
+.wsl-skill-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.wsl-skill-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* —— 从 Git 安装对话框 —— */
+.git-install-dialog {
+  width: min(560px, 92vw);
+}
+.git-install-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+.git-install-form #git-url-input {
+  flex: 1 1 260px;
+  width: auto;
+}
+.git-install-form .git-subdir {
+  flex: 0 1 150px;
+  width: auto;
+}
+.git-section {
+  margin-top: 14px;
+}
+.git-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.git-item-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.git-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  cursor: pointer;
+}
+.git-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.git-item-main small {
+  color: var(--muted);
+  font-size: 12px;
+  word-break: break-all;
+}
+
 .skill-list-table {
   display: grid;
   gap: 8px;

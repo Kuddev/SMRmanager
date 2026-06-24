@@ -4,7 +4,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import "./day-night-toggle";
 import "./styles.css";
 
-type ViewName = "clients" | "skills" | "mcp" | "rules" | "market" | "settings";
+type ViewName = "clients" | "skills" | "wsl" | "mcp" | "rules" | "market" | "settings";
 type ClientTab = "skills" | "mcp" | "rules" | "settings";
 type ThemeName = "light" | "dark";
 type ThemeMode = "light" | "dark" | "system";
@@ -42,7 +42,12 @@ type RuntimeClient = {
 };
 
 type ScanRoot = { tag: string; label: string; path: string; kind: "wsl" | "custom" };
-type WslDistro = { distro: string; user: string; homeUnc: string };
+type WslDistro = { distro: string; user: string; homeUnc: string; running: boolean; isDefault: boolean };
+type GitSkillEntry = { relPath: string; name: string; description: string };
+type GitMcpEntry = { name: string; transport: string; command?: string | null; args?: string[] | null; url?: string | null };
+type GitInspectResult = { cachePath: string; skills: GitSkillEntry[]; mcpServers: GitMcpEntry[] };
+type GitApplyResult = { skillsInstalled: number; mcpInstalled: number; failed: string[]; message: string };
+type GitInstallDialogState = { url: string; subdir: string; loading: boolean; inspected: GitInspectResult | null; error: string | null };
 
 type RuntimeMcpServer = {
   id: string;
@@ -66,6 +71,8 @@ type RuntimeSkill = {
   managed: boolean;
   updatedAt?: string | null;
   tags?: string[];
+  linked?: boolean;
+  linkedClients?: string[];
 };
 
 type SkillGroup = {
@@ -241,6 +248,7 @@ type HotState = {
 const navItems = [
   ["客户端", "client", "clients"],
   ["Skills 管理", "skills", "skills"],
+  ["WSL 管理", "wsl", "wsl"],
   ["MCP 管理", "mcp", "mcp"],
   ["Rules 管理", "rules", "rules"],
   ["市场", "market", "market"],
@@ -503,7 +511,13 @@ let scanRoots: ScanRoot[] = loadScanRoots();
 let wslDistros: WslDistro[] = [];
 let wslDetecting = false;
 let wslDetectError: string | null = null;
+let activeWslDistro = "";
+let activeWslTab: "overview" | "skills" | "mcp" | "rules" | "settings" = "skills";
+let selectedWslSkillPath = "";
+let wslInstancesLoaded = false;
 let skillGroupDialog: SkillGroupDialogState | null = null;
+let skillLinkDialog: { skillPath: string; skillName: string } | null = null;
+let gitInstallDialog: GitInstallDialogState | null = null;
 let skillGridView = false;
 let skillPage = 1;
 let rulePage = 1;
@@ -1058,6 +1072,138 @@ function confirmSkillGroupDialog(name: string): void {
   renderApp(true);
 }
 
+type LibraryOpResult = { ok: number; failed: string[]; message: string };
+
+function openGitInstall(): void {
+  gitInstallDialog = { url: "", subdir: "", loading: false, inspected: null, error: null };
+  renderApp(true);
+}
+
+async function gitInspect(): Promise<void> {
+  if (!gitInstallDialog || gitInstallDialog.loading) return;
+  const url = gitInstallDialog.url.trim();
+  if (!url) {
+    gitInstallDialog.error = "请填写 Git 仓库地址";
+    renderApp(true);
+    return;
+  }
+  gitInstallDialog.loading = true;
+  gitInstallDialog.error = null;
+  gitInstallDialog.inspected = null;
+  renderApp(true);
+  try {
+    const res = await invoke<GitInspectResult>("git_inspect", { url, subdir: gitInstallDialog.subdir.trim() || null });
+    if (!gitInstallDialog) return;
+    gitInstallDialog.inspected = res;
+    gitInstallDialog.loading = false;
+    if (res.skills.length === 0 && res.mcpServers.length === 0) gitInstallDialog.error = "未在该仓库发现 Skill 或 MCP 声明";
+    renderApp(true);
+  } catch (e) {
+    if (!gitInstallDialog) return;
+    gitInstallDialog.loading = false;
+    gitInstallDialog.inspected = null;
+    gitInstallDialog.error = e instanceof Error ? e.message : String(e);
+    renderApp(true);
+  }
+}
+
+async function gitApply(): Promise<void> {
+  if (!gitInstallDialog?.inspected || gitInstallDialog.loading) return;
+  const insp = gitInstallDialog.inspected;
+  const skillRelPaths = [...document.querySelectorAll<HTMLInputElement>(".git-skill-check")]
+    .filter((c) => c.checked)
+    .map((c) => c.dataset.relPath ?? "")
+    .filter(Boolean);
+  const skillTarget = document.querySelector<HTMLSelectElement>("#git-skill-target")?.value ?? "";
+  const checkedMcp = new Set(
+    [...document.querySelectorAll<HTMLInputElement>(".git-mcp-check")].filter((c) => c.checked).map((c) => c.dataset.mcpName ?? "")
+  );
+  const mcpServers = insp.mcpServers.filter((s) => checkedMcp.has(s.name));
+  const mcpClientId = document.querySelector<HTMLSelectElement>("#git-mcp-client")?.value ?? "";
+  if (skillRelPaths.length === 0 && mcpServers.length === 0) {
+    setSkillActionMessage("请至少勾选一个 Skill 或 MCP", 2600);
+    return;
+  }
+  if (skillRelPaths.length > 0 && !skillTarget) {
+    setSkillActionMessage("请为 Skill 选择安装目标", 2600);
+    return;
+  }
+  if (mcpServers.length > 0 && !mcpClientId) {
+    setSkillActionMessage("请为 MCP 选择目标客户端", 2600);
+    return;
+  }
+  gitInstallDialog.loading = true;
+  renderApp(true);
+  try {
+    const res = await invoke<GitApplyResult>("git_apply", {
+      cachePath: insp.cachePath,
+      skillRelPaths,
+      skillTarget,
+      mcpServers,
+      mcpClientId
+    });
+    gitInstallDialog = null;
+    await loadEnvironment(true);
+    const failedText = res.failed.length ? `；失败：${res.failed.join(" / ")}` : "";
+    setSkillActionMessage(`${res.message}${failedText}`, res.failed.length ? 6000 : 3000);
+  } catch (e) {
+    if (gitInstallDialog) gitInstallDialog.loading = false;
+    setSkillActionMessage(`安装失败：${e instanceof Error ? e.message : String(e)}`, 5200);
+    renderApp(true);
+  }
+}
+
+async function adoptToLibrary(paths: string[]): Promise<void> {
+  const unique = [...new Set(paths)].filter(Boolean);
+  if (unique.length === 0 || skillTransferBusy) return;
+  skillTransferBusy = true;
+  setSkillActionMessage(`正在收编 ${unique.length} 个 Skill 进中心库...`, 0);
+  try {
+    const result = await invoke<LibraryOpResult>("adopt_skills_to_library", { paths: unique, extraRoots: scanRoots });
+    skillTransferBusy = false;
+    selectedSkillKeys.clear();
+    await loadEnvironment(true);
+    const failedText = result.failed.length ? `；失败 ${result.failed.length}：${result.failed.join(" / ")}` : "";
+    setSkillActionMessage(`${result.message}${failedText}`, result.failed.length ? 5200 : 2800);
+  } catch (error) {
+    skillTransferBusy = false;
+    setSkillActionMessage(`收编失败：${error instanceof Error ? error.message : String(error)}`, 5200);
+  }
+}
+
+async function linkSkillToClients(skillPath: string, clientIds: string[]): Promise<void> {
+  if (clientIds.length === 0 || skillTransferBusy) return;
+  skillTransferBusy = true;
+  setSkillActionMessage("正在链接到客户端...", 0);
+  try {
+    const result = await invoke<LibraryOpResult>("link_skill_to_clients", { librarySkillPath: skillPath, clientIds });
+    skillTransferBusy = false;
+    skillLinkDialog = null;
+    await loadEnvironment(true);
+    const failedText = result.failed.length ? `；失败：${result.failed.join(" / ")}` : "";
+    setSkillActionMessage(`${result.message}${failedText}`, result.failed.length ? 5200 : 2800);
+  } catch (error) {
+    skillTransferBusy = false;
+    setSkillActionMessage(`链接失败：${error instanceof Error ? error.message : String(error)}`, 5200);
+  }
+}
+
+async function unlinkSkillFromClients(skillPath: string, clientIds: string[]): Promise<void> {
+  if (clientIds.length === 0 || skillTransferBusy) return;
+  skillTransferBusy = true;
+  setSkillActionMessage("正在移除链接...", 0);
+  try {
+    const result = await invoke<LibraryOpResult>("unlink_skill_from_clients", { librarySkillPath: skillPath, clientIds });
+    skillTransferBusy = false;
+    await loadEnvironment(true);
+    const failedText = result.failed.length ? `；失败：${result.failed.join(" / ")}` : "";
+    setSkillActionMessage(`${result.message}${failedText}`, result.failed.length ? 5200 : 2800);
+  } catch (error) {
+    skillTransferBusy = false;
+    setSkillActionMessage(`移除链接失败：${error instanceof Error ? error.message : String(error)}`, 5200);
+  }
+}
+
 async function transferSkills(paths: string[], targetClientId: string, action: SkillTransferAction): Promise<void> {
   const uniquePaths = [...new Set(paths)].filter(Boolean);
   if (uniquePaths.length === 0 || !targetClientId || skillTransferBusy) return;
@@ -1298,7 +1444,7 @@ async function deleteClientConfig(clientId: string): Promise<void> {
 }
 
 function navIcon(name: string): string {
-  const map: Record<string, string> = { client: "▣", skills: "✦", mcp: "◎", rules: "♙", market: "⌂", settings: "⚙" };
+  const map: Record<string, string> = { client: "▣", skills: "✦", wsl: "🐧", mcp: "◎", rules: "♙", market: "⌂", settings: "⚙" };
   return map[name] ?? "▣";
 }
 
@@ -1312,7 +1458,7 @@ function renderSidebar(): string {
   const nav = navItems
     .map(([label, icon, view]) => `
       <button class="nav-item ${view === currentView ? "is-active" : ""}" data-view="${view}" type="button">
-        <span class="nav-icon">${navIcon(icon)}</span><span>${label}</span>
+        <span class="nav-icon">${navIcon(icon)}</span><span>${label}</span>${view === "wsl" ? `<span class="nav-beta">Beta</span>` : ""}
       </button>`)
     .join("");
   const updateReminder = visibleUpdateAvailable()
@@ -1551,6 +1697,213 @@ function renderClientView(): string {
   return `<main class="workspace"><div class="dashboard-grid">${renderClientsList()}${renderClientMain(client)}${renderInspector(client)}</div></main>`;
 }
 
+// —— WSL 独立管理页 ——
+function wslTag(distro: string): string {
+  return `wsl-${distro}`;
+}
+function wslInstanceSkills(distro: string): RuntimeSkill[] {
+  const suffix = `@${wslTag(distro)}`;
+  return (environment?.skills ?? []).filter((s) => s.clientId.endsWith(suffix));
+}
+function wslInstanceMcps(distro: string): RuntimeMcpServer[] {
+  const suffix = `@${wslTag(distro)}`;
+  return (environment?.mcpServers ?? []).filter((s) => s.clientId.endsWith(suffix));
+}
+function wslInstanceRules(distro: string): RuntimeRule[] {
+  const suffix = `@${wslTag(distro)}`;
+  return (environment?.rules ?? []).filter((r) => r.clientId.endsWith(suffix));
+}
+
+async function loadWslInstances(): Promise<void> {
+  if (wslDetecting) return;
+  wslDetecting = true;
+  wslDetectError = null;
+  renderApp(true);
+  try {
+    wslDistros = await invoke<WslDistro[]>("list_wsl_distros");
+    wslInstancesLoaded = true;
+    if (wslDistros.length === 0) wslDetectError = "未检测到 WSL 发行版（需安装 WSL）";
+    if (!wslDistros.some((d) => d.distro === activeWslDistro)) {
+      const pick = wslDistros.find((d) => d.isDefault) ?? wslDistros.find((d) => d.running) ?? wslDistros[0];
+      activeWslDistro = pick?.distro ?? "";
+    }
+    ensureWslScanned();
+  } catch (error) {
+    wslDistros = [];
+    wslInstancesLoaded = true;
+    wslDetectError = error instanceof Error ? error.message : String(error);
+  } finally {
+    wslDetecting = false;
+    renderApp(true);
+  }
+}
+
+// 确保当前选中的运行中实例已纳入扫描根，使 environment 含其 Skills/MCP/Rules。
+function ensureWslScanned(): void {
+  const inst = wslDistros.find((d) => d.distro === activeWslDistro);
+  if (!inst || !inst.running || !inst.homeUnc) return;
+  const tag = wslTag(inst.distro);
+  if (!scanRoots.some((r) => r.tag === tag)) {
+    scanRoots = [...scanRoots, { tag, label: `WSL: ${inst.distro}`, path: inst.homeUnc, kind: "wsl" }];
+    saveScanRoots();
+    void loadEnvironment(true);
+  }
+}
+
+function selectWslDistro(name: string): void {
+  activeWslDistro = name;
+  selectedWslSkillPath = "";
+  activeWslTab = "skills";
+  ensureWslScanned();
+  renderApp(true);
+}
+
+async function wslControl(command: string, distro: string, okMsg: string): Promise<void> {
+  try {
+    await invoke(command, { distro });
+    setSkillActionMessage(okMsg, 2400);
+    await loadWslInstances();
+  } catch (error) {
+    setSkillActionMessage(`操作失败：${error instanceof Error ? error.message : String(error)}`, 5000);
+  }
+}
+
+function renderWslView(): string {
+  if (!wslInstancesLoaded && !wslDetecting) {
+    void loadWslInstances();
+  }
+  return `<main class="workspace"><div class="dashboard-grid">${renderWslInstanceList()}${renderWslMain()}${renderWslInspector()}</div></main>`;
+}
+
+function renderWslInstanceList(): string {
+  const rows = wslDistros
+    .map((d) => {
+      const active = d.distro === activeWslDistro;
+      return `<button class="client-row ${active ? "is-selected" : ""}" data-wsl-distro="${html(d.distro)}" type="button">
+        <span class="wsl-status-dot ${d.running ? "running" : "stopped"}"></span>
+        <span class="client-row-copy"><strong>${html(d.distro)}${d.isDefault ? `<span class="wsl-default-tag">默认</span>` : ""}</strong><small>${d.running ? "运行中" : "已停止"}</small></span>
+      </button>`;
+    })
+    .join("");
+  return `<section class="client-list-card">
+    <div class="list-heading"><strong>WSL 实例</strong><span>${wslDistros.length}</span></div>
+    ${wslDetectError ? `<div class="status-banner danger">${html(wslDetectError)}</div>` : ""}
+    <div class="client-list">${rows || `<div class="empty-config-panel">${wslDetecting ? "检测中..." : "未检测到 WSL 发行版"}</div>`}</div>
+    <button id="refresh-wsl" class="text-action" type="button"><span>${svgIcon("refresh", 15)}</span>${wslDetecting ? "检测中..." : "刷新实例"}</button>
+    <a class="wsl-help-link" href="https://learn.microsoft.com/windows/wsl/" target="_blank" rel="noreferrer">如何管理 WSL 实例?</a>
+  </section>`;
+}
+
+function renderWslMain(): string {
+  const inst = wslDistros.find((d) => d.distro === activeWslDistro);
+  if (!inst) {
+    return `<section class="client-main-card"><div class="empty-config-panel">请选择左侧的 WSL 实例。</div></section>`;
+  }
+  const skills = wslInstanceSkills(inst.distro);
+  const mcps = wslInstanceMcps(inst.distro);
+  const rules = wslInstanceRules(inst.distro);
+  const tab = (id: string, label: string, count?: number) =>
+    `<button class="tab ${activeWslTab === id ? "is-active" : ""}" data-wsl-tab="${id}" type="button">${label}${count !== undefined ? `<span>${count}</span>` : ""}</button>`;
+
+  let content = "";
+  if (!inst.running) {
+    content = `<div class="install-required inline"><div class="install-required-icon">!</div><div><h3>该发行版未运行</h3><p>启动后才能读取其中的 Skills / MCP / Rules。</p><button class="primary-button" data-wsl-start="${html(inst.distro)}" type="button">启动 ${html(inst.distro)}</button></div></div>`;
+  } else if (activeWslTab === "skills") {
+    content = `<div class="skill-list-table">${
+      skills.length
+        ? skills
+            .map(
+              (s) => `<article class="skill-list-row wsl-skill-row ${selectedWslSkillPath === s.path ? "is-selected" : ""}" data-wsl-skill-path="${html(s.path)}">
+        <div class="skill-row-icon ${skillTone(s)}">${html(skillInitials(s.name))}</div>
+        <div class="skill-row-main">
+          <div class="skill-row-title"><strong>${html(s.name)}</strong></div>
+          <p>${html(skillDescription(s))}</p>
+          <div class="skill-chip-row">${skillTags(s).map((t) => `<span>${html(t)}</span>`).join("")}</div>
+          <code>${html(s.path)}</code>
+        </div>
+        <div class="skill-row-meta updated"><span>更新时间</span><strong>${formatUpdated(s.updatedAt)}</strong></div>
+        <span class="status-pill is-on" title="即将支持启用/禁用">已检测</span>
+      </article>`
+            )
+            .join("")
+        : `<div class="empty-config-panel">该实例未检测到 Skills。</div>`
+    }</div>`;
+  } else if (activeWslTab === "mcp") {
+    content = `<div class="tool-stack">${mcps.length ? mcps.map(renderDetectedMcp).join("") : `<div class="empty-config-panel">该实例未检测到 MCP。</div>`}</div>`;
+  } else if (activeWslTab === "rules") {
+    content = `<div class="rule-list-table">${rules.length ? rules.map(renderRuleListRow).join("") : `<div class="empty-config-panel">该实例未检测到 Rules。</div>`}</div>`;
+  } else if (activeWslTab === "settings") {
+    content = `<div class="info-card"><dl>
+      <dt>发行版</dt><dd>${html(inst.distro)}</dd>
+      <dt>用户</dt><dd>${html(inst.user || "—")}</dd>
+      <dt>家目录</dt><dd><code>${html(inst.homeUnc || "—")}</code></dd>
+      <dt>状态</dt><dd>${inst.running ? "运行中" : "已停止"}${inst.isDefault ? " · 默认" : ""}</dd>
+    </dl></div>`;
+  } else {
+    content = `<div class="skills-stat-grid">
+      <article><strong>Skills</strong><b>${skills.length}</b><span>该实例</span><i>✦</i></article>
+      <article><strong>MCP</strong><b>${mcps.length}</b><span>该实例</span><i>◎</i></article>
+      <article><strong>Rules</strong><b>${rules.length}</b><span>该实例</span><i>♙</i></article>
+      <article><strong>状态</strong><b>${inst.running ? "运行" : "停止"}</b><span>${inst.isDefault ? "默认实例" : "非默认"}</span><i>🐧</i></article>
+    </div>`;
+  }
+
+  return `<section class="client-main-card">
+    <div class="client-hero">
+      <div class="hero-left"><span class="avatar large wsl-avatar">🐧</span><div><h2>${html(inst.distro)}</h2><small class="wsl-sub">${inst.running ? "运行中" : "已停止"}${inst.isDefault ? " · 默认" : ""}</small></div></div>
+      <div class="hero-actions">
+        <button class="secondary-button" data-wsl-terminal="${html(inst.distro)}" type="button">⎘ 在终端中打开</button>
+        <div class="client-menu-wrap"><button id="wsl-actions-toggle" class="ghost-dots ${clientMenuOpen ? "is-open" : ""}" type="button">${svgIcon("more", 18)}</button>${
+          clientMenuOpen
+            ? `<div class="client-menu" role="menu">
+          <button class="client-menu-item" data-wsl-default="${html(inst.distro)}" type="button" ${inst.isDefault ? "disabled" : ""}>设为默认</button>
+          ${inst.running ? `<button class="client-menu-item" data-wsl-stop="${html(inst.distro)}" type="button">停止</button>` : `<button class="client-menu-item" data-wsl-start="${html(inst.distro)}" type="button">启动</button>`}
+        </div>`
+            : ""
+        }</div>
+      </div>
+    </div>
+    <div class="tabs">
+      ${tab("overview", "概览")}
+      ${tab("skills", "Skills", skills.length)}
+      ${tab("mcp", "MCP", mcps.length)}
+      ${tab("rules", "Rules", rules.length)}
+      ${tab("settings", "设置")}
+    </div>
+    <div class="client-tab-scroll">${content}</div>
+  </section>`;
+}
+
+function renderWslInspector(): string {
+  const skill = selectedWslSkillPath ? (environment?.skills ?? []).find((s) => s.path === selectedWslSkillPath) : undefined;
+  if (!skill) {
+    return `<aside class="inspector"><section class="info-card"><h3>Skill 信息</h3><p class="placeholder-copy">在中间列选择一个 Skill 查看详情。</p></section></aside>`;
+  }
+  const baseName = clientNameById(skill.clientId.split("@")[0]);
+  return `<aside class="inspector">
+    <section class="info-card">
+      <h3>Skill 信息</h3>
+      <div class="wsl-skill-detail-head"><div class="skill-row-icon ${skillTone(skill)}">${html(skillInitials(skill.name))}</div><div><strong>${html(skill.name)}</strong></div></div>
+      <dl>
+        <dt>类型</dt><dd>${html(baseName)} Skill</dd>
+        <dt>分类标签</dt><dd>${(skill.tags ?? []).map((t) => `<span class="skill-linked-chip">${html(t)}</span>`).join(" ") || "—"}</dd>
+        <dt>描述</dt><dd>${html(skillDescription(skill))}</dd>
+        <dt>安装路径</dt><dd><code>${html(skill.path)}</code></dd>
+        <dt>最后更新</dt><dd>${formatUpdated(skill.updatedAt)}</dd>
+      </dl>
+    </section>
+    <section class="info-card compact">
+      <h3>操作</h3>
+      <div class="wsl-skill-actions">
+        <button class="ghost-mini-button" type="button" disabled title="即将支持">配置</button>
+        <button class="ghost-mini-button" type="button" disabled title="即将支持">禁用</button>
+        <button class="danger-mini-button" type="button" disabled title="即将支持">卸载</button>
+      </div>
+      <p class="placeholder-copy">启用/禁用、配置、卸载将在后续 WSL 专项支持。</p>
+    </section>
+  </aside>`;
+}
+
 function renderMcpView(): string {
   const rows = (environment?.mcpServers ?? []).map(renderDetectedMcp).join("");
   return `
@@ -1673,7 +2026,8 @@ function renderSkillsView(): string {
       const matchesClient = skillClientFilter === "all" || skill.clientId === skillClientFilter;
       const matchesStatus =
         skillStatusFilter === "all" ||
-        (skillStatusFilter === "shared" && skill.managed) ||
+        (skillStatusFilter === "library" && skill.clientId === "library") ||
+        (skillStatusFilter === "shared" && skill.managed && skill.clientId !== "library") ||
         (skillStatusFilter === "client" && !skill.managed);
       const matchesTag = skillTagFilter === "all" || (skill.tags ?? []).includes(skillTagFilter);
       const matchesGroup = !activeGroupKeys || activeGroupKeys.has(skillKey(skill));
@@ -1699,6 +2053,29 @@ function renderSkillsView(): string {
         const key = skillKey(skill);
         const selected = selectedSkillKeys.has(key);
         const isExtra = isExtraSourceSkill(skill);
+        const isLibrary = skill.clientId === "library";
+        const linkedBadges =
+          isLibrary && skill.linkedClients && skill.linkedClients.length > 0
+            ? `<div class="skill-linked-badges"><span class="skill-linked-label">已链接</span>${skill.linkedClients
+                .map((cid) => `<span class="skill-linked-chip">${html(clientNameById(cid))}</span>`)
+                .join("")}</div>`
+            : isLibrary
+              ? `<div class="skill-linked-badges"><span class="skill-linked-empty">未链接到任何客户端</span></div>`
+              : "";
+        const pill = isLibrary
+          ? `<span class="skill-lib-pill">中心库</span>`
+          : isExtra
+            ? `<span class="skill-readonly-pill">${html(skill.clientName.includes("WSL") ? "WSL · 只读" : "只读")}</span>`
+            : "";
+        const rowActions = `<div class="skill-row-actions">${
+          isLibrary
+            ? `<button class="ghost-mini-button" data-link-skill-path="${html(skill.path)}" data-skill-name="${html(skill.name)}" type="button">链接到客户端…</button>`
+            : ""
+        }${
+          !isLibrary && !isExtra
+            ? `<button class="ghost-mini-button" data-adopt-skill-path="${html(skill.path)}" type="button" ${skillTransferBusy ? "disabled" : ""}>收编进库</button>`
+            : ""
+        }</div>`;
         return `
       <article class="skill-list-row ${selected ? "is-selected" : ""}" data-skill-key="${html(key)}" data-skill-path="${html(skill.path)}">
         <label class="skill-check" title="选择 ${html(skill.name)}">
@@ -1706,10 +2083,11 @@ function renderSkillsView(): string {
         </label>
         <div class="skill-row-icon ${skillTone(skill)}">${html(skillInitials(skill.name))}</div>
         <div class="skill-row-main">
-          <div class="skill-row-title"><strong>${html(skill.name)}</strong>${isExtra ? `<span class="skill-readonly-pill">${html(skill.clientName.includes("WSL") ? "WSL · 只读" : "只读")}</span>` : ""}</div>
+          <div class="skill-row-title"><strong>${html(skill.name)}</strong>${pill}</div>
           <p>${html(skillDescription(skill))}</p>
           <div class="skill-chip-row">${skillTags(skill).map((tag) => `<span>${html(tag)}</span>`).join("")}</div>
           <code>${html(skill.path)}</code>
+          ${linkedBadges}${rowActions}
         </div>
         <div class="skill-row-meta source"><span>客户端</span><strong>${html(skill.clientName)}</strong></div>
         <div class="skill-row-meta updated"><span>更新时间</span><strong>${formatUpdated(skill.updatedAt)}</strong></div>
@@ -1722,7 +2100,7 @@ function renderSkillsView(): string {
     <main class="workspace single-column-workspace"><section class="client-main-card management-card skills-page-card">
       <div class="skills-page-hero">
         <div class="hero-left"><span class="avatar large skills-avatar">S</span><div><h2>Skills 管理</h2><p>管理和组织所有客户端的 Skills，支持单个删除、多选删除和批量删除。</p></div></div>
-        <div class="skills-hero-actions"><button id="import-skill-button" class="secondary-button" type="button">${svgIcon("download", 15)} 导入 Skill</button><button id="refresh-detection" class="secondary-button" type="button">重新检测</button></div>
+        <div class="skills-hero-actions"><button id="git-install-button" class="secondary-button" type="button">⬇ 从 Git 安装</button><button id="import-skill-button" class="secondary-button" type="button">${svgIcon("download", 15)} 导入 Skill</button><button id="refresh-detection" class="secondary-button" type="button">重新检测</button></div>
       </div>
       ${installed.length === 0 ? `<div class="install-required inline"><div class="install-required-icon">!</div><div><h3>需要先安装客户端</h3><p>未检测到可管理客户端。安装 Claude、Cursor、OpenCode、Trae 或 Codex 后，Skills 才会在这里显示。</p></div></div>` : ""}
       <div class="skills-stat-grid">
@@ -1739,6 +2117,7 @@ function renderSkillsView(): string {
         </select>
         <select id="skill-status-filter" class="skills-select">
           <option value="all" ${skillStatusFilter === "all" ? "selected" : ""}>全部状态</option>
+          <option value="library" ${skillStatusFilter === "library" ? "selected" : ""}>中心库</option>
           <option value="client" ${skillStatusFilter === "client" ? "selected" : ""}>客户端目录</option>
           <option value="shared" ${skillStatusFilter === "shared" ? "selected" : ""}>共享目录</option>
         </select>
@@ -1843,7 +2222,7 @@ function renderMarketView(): string {
       );
     return `
     <main class="market-workspace">
-      <header class="market-page-header"><div><h1>市场</h1><p>内置常用 MCP 服务，一键写入所选客户端的配置文件。</p></div></header>
+      <header class="market-page-header"><div><h1>市场</h1><p>内置常用 MCP 服务，一键写入所选客户端的配置文件。</p></div><button id="git-install-button" class="secondary-button" type="button">⬇ 从 Git 安装</button></header>
       ${tabs}
       <section class="market-toolbar mcp-market-toolbar"><label class="market-search-box"><span>${svgIcon("search", 16)}</span><input id="mcp-search-input" value="${html(mcpQuery)}" placeholder="搜索 MCP..." /></label><select id="mcp-sort-select" class="skills-select"><option value="name" ${mcpSort === "name" ? "selected" : ""}>按名称排序</option><option value="transport" ${mcpSort === "transport" ? "selected" : ""}>按传输方式排序</option></select><button id="refresh-detection" class="refresh-button" type="button">${svgIcon("refresh", 16)}</button></section>
       <section class="install-route-panel"><strong>MCP 写入</strong><span>选择目标客户端后会把 MCP 配置写入其配置文件（claude / claude-desktop / gemini / cursor / trae 用 JSON，codex 用 TOML）。写入后请重新检测。</span></section>
@@ -1858,7 +2237,7 @@ function renderMarketView(): string {
     .sort((a, b) => (marketSkillSort === "rating" ? parseFloat(b.rating) - parseFloat(a.rating) : a.name.localeCompare(b.name)));
   return `
     <main class="market-workspace">
-      <header class="market-page-header"><div><h1>市场</h1><p>支持 npm、npx、pnpm、GitHub 和静态 JSON 注册表安装 Skills。</p></div></header>
+      <header class="market-page-header"><div><h1>市场</h1><p>支持 npm、npx、pnpm、GitHub 和静态 JSON 注册表安装 Skills。</p></div><button id="git-install-button" class="secondary-button" type="button">⬇ 从 Git 安装</button></header>
       ${tabs}
       <section class="market-toolbar mcp-market-toolbar"><label class="market-search-box"><span>${svgIcon("search", 16)}</span><input id="market-skill-search" value="${html(marketSkillQuery)}" placeholder="搜索 Skills..." /></label><select id="market-skill-sort" class="skills-select"><option value="name" ${marketSkillSort === "name" ? "selected" : ""}>按名称排序</option><option value="rating" ${marketSkillSort === "rating" ? "selected" : ""}>按评分排序</option></select><button id="refresh-detection" class="refresh-button" type="button">${svgIcon("refresh", 16)}</button></section>
       <section class="install-route-panel"><strong>安装路线</strong><span>CLI 包走 npm/pnpm；一次性初始化走 npx；仓库型 Skill 走 GitHub clone；无后端市场走 JSON manifest/registry。</span></section>
@@ -1965,6 +2344,7 @@ function renderPlaceholder(title: string): string {
 
 function renderContent(): string {
   if (currentView === "clients") return renderClientView();
+  if (currentView === "wsl") return renderWslView();
   if (currentView === "mcp") return renderMcpView();
   if (currentView === "skills") return renderSkillsView();
   if (currentView === "rules") return renderRulesView();
@@ -2040,6 +2420,110 @@ function renderConfirmDialog(): string {
         <div class="alert-dialog-actions">
           <button id="confirm-dialog-cancel" class="secondary-button" type="button">${html(confirmDialog.cancelLabel)}</button>
           <button id="confirm-dialog-confirm" class="danger-dialog-button" type="button">${html(confirmDialog.confirmLabel)}</button>
+        </div>
+      </section>
+    </div>`;
+}
+
+function renderGitInspected(insp: GitInspectResult, skillTargets: RuntimeClient[], mcpTargets: RuntimeClient[]): string {
+  const skillSection = insp.skills.length
+    ? `<div class="git-section">
+        <div class="git-section-head"><strong>Skills（${insp.skills.length}）</strong>
+          <select id="git-skill-target" class="skills-mini-select" title="选中 Skill 的安装目标">
+            <option value="">选择目标…</option>
+            <option value="library">中心库</option>
+            ${skillTargets.map((c) => `<option value="${html(c.id)}">${html(c.name)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="git-item-list">${insp.skills
+          .map(
+            (s) => `<label class="git-item">
+          <input type="checkbox" class="git-skill-check" data-rel-path="${html(s.relPath)}" checked />
+          <span class="git-item-main"><strong>${html(s.name)}</strong><small>${html(s.description || s.relPath)}</small></span>
+        </label>`
+          )
+          .join("")}</div>
+      </div>`
+    : `<div class="git-section"><span class="scan-roots-empty">未发现 Skill。</span></div>`;
+  const mcpSection = insp.mcpServers.length
+    ? `<div class="git-section">
+        <div class="git-section-head"><strong>MCP（${insp.mcpServers.length}）</strong>
+          <select id="git-mcp-client" class="skills-mini-select" title="选中 MCP 写入的客户端">
+            <option value="">选择客户端…</option>
+            ${mcpTargets.map((c) => `<option value="${html(c.id)}">${html(c.name)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="git-item-list">${insp.mcpServers
+          .map(
+            (m) => `<label class="git-item">
+          <input type="checkbox" class="git-mcp-check" data-mcp-name="${html(m.name)}" checked />
+          <span class="git-item-main"><strong>${html(m.name)}</strong><small>${html(m.url || (m.command ? `${m.command} ${(m.args ?? []).join(" ")}` : m.transport))}</small></span>
+        </label>`
+          )
+          .join("")}</div>
+      </div>`
+    : `<div class="git-section"><span class="scan-roots-empty">未发现 MCP 声明。</span></div>`;
+  return skillSection + mcpSection;
+}
+
+function renderGitInstallDialog(): string {
+  if (!gitInstallDialog) return "";
+  const d = gitInstallDialog;
+  return `
+    <div class="alert-dialog-backdrop" role="presentation">
+      <section class="alert-dialog git-install-dialog" role="dialog" aria-modal="true" aria-labelledby="git-dialog-title">
+        <div class="alert-dialog-copy">
+          <h2 id="git-dialog-title">从 Git 安装 Skill / MCP</h2>
+          <p>粘贴公开 Git 仓库地址，检测其中的 Skills 与 MCP 声明后选择安装。仅克隆、不执行仓库脚本。</p>
+          <div class="git-install-form">
+            <input id="git-url-input" class="group-name-input" type="text" value="${html(d.url)}" placeholder="https://github.com/owner/repo（或 owner/repo）" />
+            <input id="git-subdir-input" class="group-name-input git-subdir" type="text" value="${html(d.subdir)}" placeholder="子目录（可选）" />
+            <button id="git-inspect-btn" class="secondary-button" type="button" ${d.loading ? "disabled" : ""}>${d.loading && !d.inspected ? "检测中..." : "检测"}</button>
+          </div>
+          ${d.error ? `<div class="status-banner danger">${html(d.error)}</div>` : ""}
+          ${d.inspected ? renderGitInspected(d.inspected, skillTargetClients(), mcpTargetClients()) : ""}
+        </div>
+        <div class="alert-dialog-actions">
+          <button id="git-dialog-cancel" class="secondary-button" type="button">关闭</button>
+          ${d.inspected ? `<button id="git-apply-btn" class="primary-button" type="button" ${d.loading ? "disabled" : ""}>${d.loading ? "安装中..." : "安装选中"}</button>` : ""}
+        </div>
+      </section>
+    </div>`;
+}
+
+function renderSkillLinkDialog(): string {
+  if (!skillLinkDialog) return "";
+  const dialog = skillLinkDialog;
+  const skill = skillByPath(dialog.skillPath);
+  const linkedSet = new Set(skill?.linkedClients ?? []);
+  const targets = skillTargetClients();
+  return `
+    <div class="alert-dialog-backdrop" role="presentation">
+      <section class="alert-dialog import-dialog" role="dialog" aria-modal="true" aria-labelledby="link-dialog-title">
+        <div class="alert-dialog-icon">⛓</div>
+        <div class="alert-dialog-copy">
+          <h2 id="link-dialog-title">链接「${html(dialog.skillName)}」到客户端</h2>
+          <p>勾选要链接的客户端（junction，改库即全部同步）。已链接的可单独移除。</p>
+          <div class="link-client-list">
+            ${
+              targets.length === 0
+                ? `<p class="scan-roots-empty">没有可写入的已安装客户端。</p>`
+                : targets
+                    .map((c) => {
+                      const linked = linkedSet.has(c.id);
+                      return `<label class="link-client-row">
+                <input type="checkbox" class="link-client-check" data-client-id="${html(c.id)}" ${linked ? "checked disabled" : ""} />
+                <span class="link-client-name">${html(c.name)}</span>
+                ${linked ? `<button class="ghost-mini-button" data-unlink-client="${html(c.id)}" type="button">移除</button>` : `<span class="link-client-hint">未链接</span>`}
+              </label>`;
+                    })
+                    .join("")
+            }
+          </div>
+        </div>
+        <div class="alert-dialog-actions">
+          <button id="link-dialog-cancel" class="secondary-button" type="button">关闭</button>
+          <button id="link-dialog-confirm" class="primary-button" type="button" ${skillTransferBusy ? "disabled" : ""}>链接选中</button>
         </div>
       </section>
     </div>`;
@@ -2241,7 +2725,7 @@ function renderApp(preserveScroll = false): void {
   const workspaceScrollTop = preserveScroll ? (document.querySelector<HTMLElement>(".workspace")?.scrollTop ?? 0) : 0;
   const clientTabScrollTop = preserveScroll ? (document.querySelector<HTMLElement>(".client-tab-scroll")?.scrollTop ?? 0) : 0;
   applyThemeToDocument();
-  appRoot.innerHTML = `<div class="app-shell ${currentView === "market" ? "market-preview-shell" : ""}">${renderWindowControls()}${renderSidebar()}${renderContent()}${renderConfirmDialog()}${renderImportDialog()}${renderMarketInstallDialog()}${renderMcpInstallDialog()}${renderSkillGroupDialog()}</div>`;
+  appRoot.innerHTML = `<div class="app-shell ${currentView === "market" ? "market-preview-shell" : ""}">${renderWindowControls()}${renderSidebar()}${renderContent()}${renderConfirmDialog()}${renderImportDialog()}${renderMarketInstallDialog()}${renderMcpInstallDialog()}${renderSkillGroupDialog()}${renderSkillLinkDialog()}${renderGitInstallDialog()}</div>`;
   bindInteractions();
   refreshSkillContextMenu();
   if (preserveScroll) {
@@ -2305,6 +2789,71 @@ function bindInteractions(): void {
     event.stopPropagation();
     clientMenuOpen = !clientMenuOpen;
     renderApp();
+  });
+  // —— WSL 页事件 ——
+  document.querySelectorAll<HTMLButtonElement>("[data-wsl-distro]").forEach((button) => {
+    button.addEventListener("click", () => selectWslDistro(button.dataset.wslDistro ?? ""));
+  });
+  document.querySelector<HTMLButtonElement>("#refresh-wsl")?.addEventListener("click", () => void loadWslInstances());
+  document.querySelectorAll<HTMLButtonElement>("[data-wsl-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      activeWslTab = (button.dataset.wslTab as typeof activeWslTab) ?? "skills";
+      renderApp(true);
+    });
+  });
+  document.querySelectorAll<HTMLElement>("[data-wsl-skill-path]").forEach((row) => {
+    row.addEventListener("click", () => {
+      selectedWslSkillPath = row.dataset.wslSkillPath ?? "";
+      renderApp(true);
+    });
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-wsl-terminal]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void invoke("wsl_open_terminal", { distro: button.dataset.wslTerminal ?? "" }).catch((e) =>
+        setSkillActionMessage(`打开终端失败：${e instanceof Error ? e.message : String(e)}`, 4000)
+      );
+    });
+  });
+  document.querySelector<HTMLButtonElement>("#wsl-actions-toggle")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    clientMenuOpen = !clientMenuOpen;
+    renderApp(true);
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-wsl-default]").forEach((button) => {
+    button.addEventListener("click", () => {
+      clientMenuOpen = false;
+      void wslControl("wsl_set_default", button.dataset.wslDefault ?? "", "已设为默认发行版");
+    });
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-wsl-start]").forEach((button) => {
+    button.addEventListener("click", () => {
+      clientMenuOpen = false;
+      void wslControl("wsl_start", button.dataset.wslStart ?? "", "已启动发行版");
+    });
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-wsl-stop]").forEach((button) => {
+    button.addEventListener("click", () => {
+      clientMenuOpen = false;
+      void wslControl("wsl_terminate", button.dataset.wslStop ?? "", "已停止发行版");
+    });
+  });
+  // —— 从 Git 安装 ——
+  document.querySelectorAll<HTMLButtonElement>("#git-install-button").forEach((button) => {
+    button.addEventListener("click", () => openGitInstall());
+  });
+  const gitUrlInput = document.querySelector<HTMLInputElement>("#git-url-input");
+  gitUrlInput?.addEventListener("input", () => {
+    if (gitInstallDialog) gitInstallDialog.url = gitUrlInput.value;
+  });
+  const gitSubdirInput = document.querySelector<HTMLInputElement>("#git-subdir-input");
+  gitSubdirInput?.addEventListener("input", () => {
+    if (gitInstallDialog) gitInstallDialog.subdir = gitSubdirInput.value;
+  });
+  document.querySelector<HTMLButtonElement>("#git-inspect-btn")?.addEventListener("click", () => void gitInspect());
+  document.querySelector<HTMLButtonElement>("#git-apply-btn")?.addEventListener("click", () => void gitApply());
+  document.querySelector<HTMLButtonElement>("#git-dialog-cancel")?.addEventListener("click", () => {
+    gitInstallDialog = null;
+    renderApp(true);
   });
   document.querySelectorAll<HTMLButtonElement>(".client-menu-item[data-client-action]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2652,6 +3201,42 @@ function bindInteractions(): void {
   document.querySelector<HTMLButtonElement>("#group-dialog-confirm")?.addEventListener("click", () => {
     const input = document.querySelector<HTMLInputElement>("#group-name-input");
     confirmSkillGroupDialog(input?.value ?? skillGroupDialog?.name ?? "");
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-adopt-skill-path]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const path = button.dataset.adoptSkillPath;
+      if (path) void adoptToLibrary([path]);
+    });
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-link-skill-path]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const path = button.dataset.linkSkillPath;
+      if (!path) return;
+      skillLinkDialog = { skillPath: path, skillName: button.dataset.skillName ?? "该 Skill" };
+      renderApp(true);
+    });
+  });
+  document.querySelector<HTMLButtonElement>("#link-dialog-cancel")?.addEventListener("click", () => {
+    skillLinkDialog = null;
+    renderApp(true);
+  });
+  document.querySelector<HTMLButtonElement>("#link-dialog-confirm")?.addEventListener("click", () => {
+    if (!skillLinkDialog) return;
+    const ids = [...document.querySelectorAll<HTMLInputElement>(".link-client-check")]
+      .filter((c) => c.checked && !c.disabled)
+      .map((c) => c.dataset.clientId ?? "")
+      .filter(Boolean);
+    if (ids.length === 0) {
+      setSkillActionMessage("请勾选要链接的客户端", 2400);
+      return;
+    }
+    void linkSkillToClients(skillLinkDialog.skillPath, ids);
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-unlink-client]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const cid = button.dataset.unlinkClient;
+      if (cid && skillLinkDialog) void unlinkSkillFromClients(skillLinkDialog.skillPath, [cid]);
+    });
   });
   const bulkSkillTarget = document.querySelector<HTMLSelectElement>("#bulk-skill-target");
   bulkSkillTarget?.addEventListener("change", () => {
