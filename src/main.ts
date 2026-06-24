@@ -54,171 +54,49 @@ import {
   updateTimestamp
 } from "./dom";
 
-const themeStorageKey = "smrmanager-theme";
-const dismissedUpdateStorageKey = "smrmanager-update-dismissed-version";
-const skillGroupsStorageKey = "smrmanager-skill-groups";
-const scanRootsStorageKey = "smrmanager-scan-roots";
-const hotState = import.meta.hot?.data as HotState | undefined;
-const hotView = hotState?.currentView as ViewName | "roles" | undefined;
-let activeClientIndex = hotState?.activeClientIndex ?? 0;
-let activeClientTab: ClientTab = hotState?.activeClientTab ?? "skills";
-let currentView: ViewName = hotView === "roles" ? "rules" : hotView ?? "clients";
-let themeMode: ThemeMode = hotState?.themeMode ?? readStoredThemeMode();
-let currentTheme: ThemeName = resolveTheme(themeMode);
-let environment: DetectionSnapshot | null = hotState?.environment ?? null;
-let detectionLoading = false;
-let detectionError: string | null = hotState?.detectionError ?? null;
-let installingKey: string | null = null;
-let installLogs: Record<string, string> = hotState?.installLogs ?? {};
-let installedMarketSkillIds = new Set<string>();
-let selectedSkillKeys = new Set<string>(hotState?.selectedSkillKeys ?? []);
-let skillBulkTargetId = hotState?.skillBulkTargetId ?? "";
-let skillContextMenu: SkillContextMenuState | null = null;
-let clientMenuOpen = false;
-let confirmDialog: ConfirmDialogState | null = null;
-let importSkillDialog: ImportSkillDialogState | null = null;
-let marketInstallDialog: MarketInstallDialogState | null = null;
-let marketTab: "skill" | "mcp" = "skill";
-let mcpQuery = "";
-let mcpSort: "name" | "transport" = "name";
-let marketSkillQuery = "";
-let marketSkillSort: "name" | "rating" = "name";
-let marketSkillCategory = "全部";
-let mcpInstallDialog: McpInstallDialogState | null = null;
-let skillTransferBusy = false;
-let skillQuery = hotState?.skillQuery ?? "";
-let skillClientFilter = hotState?.skillClientFilter ?? "all";
-let skillStatusFilter = hotState?.skillStatusFilter ?? "all";
-let skillTagFilter = hotState?.skillTagFilter ?? "all";
-let activeSkillGroupId = hotState?.activeSkillGroupId ?? "";
-let skillGroups: SkillGroup[] = loadSkillGroups();
-let scanRoots: ScanRoot[] = loadScanRoots();
-let wslDistros: WslDistro[] = [];
-let wslDetecting = false;
-let wslDetectError: string | null = null;
-let activeWslDistro = "";
-let activeWslTab: "overview" | "skills" | "mcp" | "rules" | "settings" = "skills";
-let selectedWslSkillPath = "";
-let wslInstancesLoaded = false;
-let skillGroupDialog: SkillGroupDialogState | null = null;
-let skillLinkDialog: { skillPath: string; skillName: string } | null = null;
-let gitInstallDialog: GitInstallDialogState | null = null;
-let skillGridView = false;
-let skillPage = 1;
-let rulePage = 1;
-let listPageSize = 10;
-let skillActionMessageTimer: number | null = null;
-let deleteBusy = false;
-let updateInfo: AppUpdateCheckResult | null = hotState?.updateInfo ?? null;
-let updateError: string | null = hotState?.updateError ?? null;
-let updateChecking = hotState?.updateChecking ?? false;
+import {
+  state,
+  saveSkillGroups,
+  saveScanRoots,
+  themeStorageKey,
+  dismissedUpdateStorageKey
+} from "./state";
 
 const appElement = document.querySelector<HTMLDivElement>("#app");
 if (!appElement) throw new Error("App root element not found.");
 const appRoot: HTMLDivElement = appElement;
 
-function readStoredThemeMode(): ThemeMode {
-  const stored = localStorage.getItem(themeStorageKey);
-  if (stored === "dark" || stored === "light" || stored === "system") return stored;
-  return "system";
-}
-
-function loadSkillGroups(): SkillGroup[] {
-  try {
-    const raw = localStorage.getItem(skillGroupsStorageKey);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(
-        (item): item is SkillGroup =>
-          Boolean(item) &&
-          typeof item.id === "string" &&
-          typeof item.name === "string" &&
-          Array.isArray(item.memberKeys)
-      )
-      .map((item) => ({
-        id: item.id,
-        name: item.name,
-        memberKeys: item.memberKeys.filter((key: unknown): key is string => typeof key === "string")
-      }));
-  } catch {
-    return [];
-  }
-}
-
-function saveSkillGroups(): void {
-  try {
-    localStorage.setItem(skillGroupsStorageKey, JSON.stringify(skillGroups));
-  } catch {
-    // 持久化失败（如隐私模式/配额）忽略，不影响本会话内的分组使用。
-  }
-}
-
-function loadScanRoots(): ScanRoot[] {
-  try {
-    const raw = localStorage.getItem(scanRootsStorageKey);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(
-        (item): item is ScanRoot =>
-          Boolean(item) &&
-          typeof item.tag === "string" &&
-          typeof item.label === "string" &&
-          typeof item.path === "string"
-      )
-      .map((item) => ({
-        tag: item.tag,
-        label: item.label,
-        path: item.path,
-        kind: item.kind === "wsl" ? "wsl" : "custom"
-      }));
-  } catch {
-    return [];
-  }
-}
-
-function saveScanRoots(): void {
-  try {
-    localStorage.setItem(scanRootsStorageKey, JSON.stringify(scanRoots));
-  } catch {
-    // 持久化失败忽略。
-  }
-}
-
 function addScanRoot(root: ScanRoot): void {
   const path = root.path.trim();
   if (!path) return;
-  if (scanRoots.some((item) => item.path.toLowerCase() === path.toLowerCase())) {
+  if (state.scanRoots.some((item) => item.path.toLowerCase() === path.toLowerCase())) {
     setSkillActionMessage("该扫描目录已添加", 2600);
     return;
   }
-  scanRoots = [...scanRoots, { ...root, path }];
+  state.scanRoots = [...state.scanRoots, { ...root, path }];
   saveScanRoots();
   void loadEnvironment(true);
 }
 
 function removeScanRoot(tag: string): void {
-  scanRoots = scanRoots.filter((item) => item.tag !== tag);
+  state.scanRoots = state.scanRoots.filter((item) => item.tag !== tag);
   saveScanRoots();
   void loadEnvironment(true);
 }
 
 async function detectWslDistros(): Promise<void> {
-  if (wslDetecting) return;
-  wslDetecting = true;
-  wslDetectError = null;
+  if (state.wslDetecting) return;
+  state.wslDetecting = true;
+  state.wslDetectError = null;
   renderApp(true);
   try {
-    wslDistros = await invoke<WslDistro[]>("list_wsl_distros");
-    if (wslDistros.length === 0) wslDetectError = "未检测到 WSL 发行版";
+    state.wslDistros = await invoke<WslDistro[]>("list_wsl_distros");
+    if (state.wslDistros.length === 0) state.wslDetectError = "未检测到 WSL 发行版";
   } catch (error) {
-    wslDistros = [];
-    wslDetectError = error instanceof Error ? error.message : String(error);
+    state.wslDistros = [];
+    state.wslDetectError = error instanceof Error ? error.message : String(error);
   } finally {
-    wslDetecting = false;
+    state.wslDetecting = false;
     renderApp(true);
   }
 }
@@ -234,32 +112,32 @@ function addWslDistroAsRoot(distro: WslDistro): void {
 
 
 function runtime(client: Client): RuntimeClient | undefined {
-  return environment?.clients.find((item) => item.id === client.id);
+  return state.environment?.clients.find((item) => item.id === client.id);
 }
 
 function clientMcps(clientId: string): RuntimeMcpServer[] {
-  return environment?.mcpServers.filter((item) => item.clientId === clientId) ?? [];
+  return state.environment?.mcpServers.filter((item) => item.clientId === clientId) ?? [];
 }
 
 function clientSkills(clientId: string): RuntimeSkill[] {
-  return (environment?.skills ?? [])
+  return (state.environment?.skills ?? [])
     .filter((item) => item.clientId === clientId)
     .sort((a, b) => Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0));
 }
 
 function clientRules(clientId: string): RuntimeRule[] {
-  return (environment?.rules ?? [])
+  return (state.environment?.rules ?? [])
     .filter((item) => item.clientId === clientId)
     .sort((a, b) => Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0));
 }
 
 function installedClients(): RuntimeClient[] {
-  return environment?.clients.filter((item) => item.installed) ?? [];
+  return state.environment?.clients.filter((item) => item.installed) ?? [];
 }
 
 // 扩展根/WSL 检测出的客户端（source 非 windows），合成为 Client 以便在客户端页独立展示。
 function extraRuntimeClients(): RuntimeClient[] {
-  return (environment?.clients ?? []).filter((item) => item.source && item.source !== "windows");
+  return (state.environment?.clients ?? []).filter((item) => item.source && item.source !== "windows");
 }
 
 function displayClients(): Client[] {
@@ -303,26 +181,26 @@ function skillTargetClients(sourceClientId?: string): RuntimeClient[] {
 }
 
 function skillByPath(path: string): RuntimeSkill | undefined {
-  return environment?.skills.find((skill) => skill.path === path);
+  return state.environment?.skills.find((skill) => skill.path === path);
 }
 
 function selectedPathsFromKeys(): string[] {
   const paths = new Set<string>();
-  for (const skill of environment?.skills ?? []) {
-    if (selectedSkillKeys.has(skillKey(skill))) paths.add(skill.path);
+  for (const skill of state.environment?.skills ?? []) {
+    if (state.selectedSkillKeys.has(skillKey(skill))) paths.add(skill.path);
   }
   return [...paths];
 }
 
 function transferPathsForContext(key: string, path: string): string[] {
-  if (currentView === "skills" && selectedSkillKeys.has(key) && selectedSkillKeys.size > 1) {
+  if (state.currentView === "skills" && state.selectedSkillKeys.has(key) && state.selectedSkillKeys.size > 1) {
     return selectedPathsFromKeys();
   }
   return [path];
 }
 
 function preferredSkillTargetId(targets: RuntimeClient[]): string {
-  if (targets.some((client) => client.id === skillBulkTargetId)) return skillBulkTargetId;
+  if (targets.some((client) => client.id === state.skillBulkTargetId)) return state.skillBulkTargetId;
   return targets[0]?.id ?? "";
 }
 
@@ -347,52 +225,51 @@ function mcpTargetClients(): RuntimeClient[] {
 }
 
 function isUpdateDismissed(): boolean {
-  const version = updateInfo?.latestVersion;
+  const version = state.updateInfo?.latestVersion;
   return Boolean(version && localStorage.getItem(dismissedUpdateStorageKey) === version);
 }
 
 function visibleUpdateAvailable(): boolean {
-  return Boolean(updateInfo?.available && updateInfo.latestVersion && !isUpdateDismissed());
+  return Boolean(state.updateInfo?.available && state.updateInfo.latestVersion && !isUpdateDismissed());
 }
 
 async function loadEnvironment(force = false): Promise<void> {
-  if (detectionLoading && !force) return;
-  detectionLoading = true;
+  if (state.detectionLoading && !force) return;
+  state.detectionLoading = true;
   renderApp();
   try {
-    environment = await invoke<DetectionSnapshot>("detect_environment", { extraRoots: scanRoots });
-    detectionError = null;
+    state.environment = await invoke<DetectionSnapshot>("detect_environment", { extraRoots: state.scanRoots });
+    state.detectionError = null;
     const list = displayClients();
-    const selected = list[activeClientIndex] ?? list[0];
+    const selected = list[state.activeClientIndex] ?? list[0];
     const firstInstalled = list.findIndex((item) => runtime(item)?.installed);
-    if (!runtime(selected)?.installed && firstInstalled >= 0) activeClientIndex = firstInstalled;
+    if (!runtime(selected)?.installed && firstInstalled >= 0) state.activeClientIndex = firstInstalled;
   } catch (error) {
-    detectionError = error instanceof Error ? error.message : String(error);
+    state.detectionError = error instanceof Error ? error.message : String(error);
   } finally {
-    detectionLoading = false;
+    state.detectionLoading = false;
     renderApp();
   }
 }
 
 async function checkUpdates(manual = false): Promise<void> {
-  if (updateChecking) return;
-  updateChecking = true;
-  if (manual) updateError = null;
+  if (state.updateChecking) return;
+  state.updateChecking = true;
+  if (manual) state.updateError = null;
   renderApp();
   try {
-    updateInfo = await invoke<AppUpdateCheckResult>("check_app_update", { endpoint: null });
-    updateError = null;
+    state.updateInfo = await invoke<AppUpdateCheckResult>("check_app_update", { endpoint: null });
+    state.updateError = null;
   } catch (error) {
-    updateError = error instanceof Error ? error.message : String(error);
-    if (manual) updateInfo = null;
+    state.updateError = error instanceof Error ? error.message : String(error);
+    if (manual) state.updateInfo = null;
   } finally {
-    updateChecking = false;
+    state.updateChecking = false;
     renderApp();
   }
 }
 
 type ToastType = "info" | "success" | "error";
-let activeToast: HTMLElement | null = null;
 
 function ensureToastStack(): HTMLElement {
   let stack = document.getElementById("toast-stack");
@@ -435,43 +312,43 @@ function toastTypeForMessage(message: string): ToastType {
 // 浮层 toast：独立于 renderApp，避免反馈时触发整页重建/列表抖动。
 // 始终只保留一个 toast，新消息替换旧的，避免连续操作时多个 toast 叠加。
 function setSkillActionMessage(message: string | null, timeoutMs = 2600): void {
-  if (skillActionMessageTimer !== null) {
-    window.clearTimeout(skillActionMessageTimer);
-    skillActionMessageTimer = null;
+  if (state.skillActionMessageTimer !== null) {
+    window.clearTimeout(state.skillActionMessageTimer);
+    state.skillActionMessageTimer = null;
   }
-  if (activeToast) {
-    dismissToast(activeToast);
-    activeToast = null;
+  if (state.activeToast) {
+    dismissToast(state.activeToast);
+    state.activeToast = null;
   }
   if (!message) return;
   const toast = createToast(message, toastTypeForMessage(message));
-  activeToast = toast;
+  state.activeToast = toast;
   if (timeoutMs > 0) {
-    skillActionMessageTimer = window.setTimeout(() => {
+    state.skillActionMessageTimer = window.setTimeout(() => {
       dismissToast(toast);
-      if (activeToast === toast) activeToast = null;
-      skillActionMessageTimer = null;
+      if (state.activeToast === toast) state.activeToast = null;
+      state.skillActionMessageTimer = null;
     }, timeoutMs);
   }
 }
 
 async function deleteSkills(paths: string[]): Promise<void> {
   const uniquePaths = [...new Set(paths)].filter(Boolean);
-  if (uniquePaths.length === 0 || deleteBusy) return;
-  deleteBusy = true;
+  if (uniquePaths.length === 0 || state.deleteBusy) return;
+  state.deleteBusy = true;
   setSkillActionMessage(`正在删除 ${uniquePaths.length} 个 Skill...`, 0);
   try {
     const result = await invoke<DeleteSkillsResult>("delete_skills", { paths: uniquePaths });
     const removedPaths = new Set(uniquePaths);
-    for (const key of [...selectedSkillKeys]) {
-      if (removedPaths.has(key.slice(key.indexOf("::") + 2))) selectedSkillKeys.delete(key);
+    for (const key of [...state.selectedSkillKeys]) {
+      if (removedPaths.has(key.slice(key.indexOf("::") + 2))) state.selectedSkillKeys.delete(key);
     }
     const failedText = result.failed.length ? `；失败 ${result.failed.length} 个：${result.failed.join(" / ")}` : "";
-    deleteBusy = false;
+    state.deleteBusy = false;
     await loadEnvironment(true);
     setSkillActionMessage(`${result.message}${failedText}`, result.failed.length ? 5200 : 2600);
   } catch (error) {
-    deleteBusy = false;
+    state.deleteBusy = false;
     setSkillActionMessage(`删除失败：${error instanceof Error ? error.message : String(error)}`, 5200);
   }
 }
@@ -481,12 +358,12 @@ function generateGroupId(): string {
 }
 
 function findSkillGroup(id: string): SkillGroup | undefined {
-  return skillGroups.find((group) => group.id === id);
+  return state.skillGroups.find((group) => group.id === id);
 }
 
 // 分组中在当前检测环境里真实存在的成员数量。
 function groupMemberCount(group: SkillGroup): number {
-  const keys = new Set((environment?.skills ?? []).map((skill) => skillKey(skill)));
+  const keys = new Set((state.environment?.skills ?? []).map((skill) => skillKey(skill)));
   return group.memberKeys.filter((key) => keys.has(key)).length;
 }
 
@@ -494,7 +371,7 @@ function groupMemberCount(group: SkillGroup): number {
 function groupMemberPaths(group: SkillGroup): string[] {
   const members = new Set(group.memberKeys);
   const paths = new Set<string>();
-  for (const skill of environment?.skills ?? []) {
+  for (const skill of state.environment?.skills ?? []) {
     if (members.has(skillKey(skill))) paths.add(skill.path);
   }
   return [...paths];
@@ -506,7 +383,7 @@ function createSkillGroup(name: string, memberKeys: string[] = []): SkillGroup {
     name: name.trim() || "未命名分组",
     memberKeys: [...new Set(memberKeys)]
   };
-  skillGroups = [...skillGroups, group];
+  state.skillGroups = [...state.skillGroups, group];
   saveSkillGroups();
   return group;
 }
@@ -514,24 +391,24 @@ function createSkillGroup(name: string, memberKeys: string[] = []): SkillGroup {
 function renameSkillGroup(id: string, name: string): void {
   const trimmed = name.trim();
   if (!trimmed) return;
-  skillGroups = skillGroups.map((group) => (group.id === id ? { ...group, name: trimmed } : group));
+  state.skillGroups = state.skillGroups.map((group) => (group.id === id ? { ...group, name: trimmed } : group));
   saveSkillGroups();
 }
 
 function deleteSkillGroup(id: string): void {
   const group = findSkillGroup(id);
-  skillGroups = skillGroups.filter((item) => item.id !== id);
-  if (activeSkillGroupId === id) activeSkillGroupId = "";
+  state.skillGroups = state.skillGroups.filter((item) => item.id !== id);
+  if (state.activeSkillGroupId === id) state.activeSkillGroupId = "";
   saveSkillGroups();
   if (group) setSkillActionMessage(`已删除分组「${group.name}」（Skill 文件未改动）`, 2600);
 }
 
 function addSelectedToGroup(id: string): void {
   const group = findSkillGroup(id);
-  if (!group || selectedSkillKeys.size === 0) return;
+  if (!group || state.selectedSkillKeys.size === 0) return;
   const keys = new Set(group.memberKeys);
   let added = 0;
-  for (const key of selectedSkillKeys) {
+  for (const key of state.selectedSkillKeys) {
     if (!keys.has(key)) {
       keys.add(key);
       added += 1;
@@ -547,9 +424,9 @@ function addSelectedToGroup(id: string): void {
 
 function removeSelectedFromGroup(id: string): void {
   const group = findSkillGroup(id);
-  if (!group || selectedSkillKeys.size === 0) return;
+  if (!group || state.selectedSkillKeys.size === 0) return;
   const before = group.memberKeys.length;
-  group.memberKeys = group.memberKeys.filter((key) => !selectedSkillKeys.has(key));
+  group.memberKeys = group.memberKeys.filter((key) => !state.selectedSkillKeys.has(key));
   saveSkillGroups();
   setSkillActionMessage(`已从分组「${group.name}」移除 ${before - group.memberKeys.length} 个 Skill`, 2600);
 }
@@ -567,25 +444,25 @@ function assignGroupToClient(id: string, targetClientId: string): void {
 }
 
 function openCreateGroupDialog(addSelected = false): void {
-  skillGroupDialog = { mode: "create", name: "", addSelected };
+  state.skillGroupDialog = { mode: "create", name: "", addSelected };
   renderApp(true);
 }
 
 function openRenameGroupDialog(id: string): void {
   const group = findSkillGroup(id);
   if (!group) return;
-  skillGroupDialog = { mode: "rename", id, name: group.name };
+  state.skillGroupDialog = { mode: "rename", id, name: group.name };
   renderApp(true);
 }
 
 function confirmSkillGroupDialog(name: string): void {
-  const dialog = skillGroupDialog;
+  const dialog = state.skillGroupDialog;
   if (!dialog) return;
   const trimmed = name.trim();
   if (!trimmed) return;
   if (dialog.mode === "create") {
-    const group = createSkillGroup(trimmed, dialog.addSelected ? [...selectedSkillKeys] : []);
-    activeSkillGroupId = group.id;
+    const group = createSkillGroup(trimmed, dialog.addSelected ? [...state.selectedSkillKeys] : []);
+    state.activeSkillGroupId = group.id;
     setSkillActionMessage(
       dialog.addSelected ? `已新建分组「${group.name}」并加入 ${group.memberKeys.length} 个 Skill` : `已新建分组「${group.name}」`,
       2600
@@ -593,48 +470,48 @@ function confirmSkillGroupDialog(name: string): void {
   } else if (dialog.id) {
     renameSkillGroup(dialog.id, trimmed);
   }
-  skillGroupDialog = null;
+  state.skillGroupDialog = null;
   renderApp(true);
 }
 
 type LibraryOpResult = { ok: number; failed: string[]; message: string };
 
 function openGitInstall(): void {
-  gitInstallDialog = { url: "", subdir: "", loading: false, inspected: null, error: null };
+  state.gitInstallDialog = { url: "", subdir: "", loading: false, inspected: null, error: null };
   renderApp(true);
 }
 
 async function gitInspect(): Promise<void> {
-  if (!gitInstallDialog || gitInstallDialog.loading) return;
-  const url = gitInstallDialog.url.trim();
+  if (!state.gitInstallDialog || state.gitInstallDialog.loading) return;
+  const url = state.gitInstallDialog.url.trim();
   if (!url) {
-    gitInstallDialog.error = "请填写 Git 仓库地址";
+    state.gitInstallDialog.error = "请填写 Git 仓库地址";
     renderApp(true);
     return;
   }
-  gitInstallDialog.loading = true;
-  gitInstallDialog.error = null;
-  gitInstallDialog.inspected = null;
+  state.gitInstallDialog.loading = true;
+  state.gitInstallDialog.error = null;
+  state.gitInstallDialog.inspected = null;
   renderApp(true);
   try {
-    const res = await invoke<GitInspectResult>("git_inspect", { url, subdir: gitInstallDialog.subdir.trim() || null });
-    if (!gitInstallDialog) return;
-    gitInstallDialog.inspected = res;
-    gitInstallDialog.loading = false;
-    if (res.skills.length === 0 && res.mcpServers.length === 0) gitInstallDialog.error = "未在该仓库发现 Skill 或 MCP 声明";
+    const res = await invoke<GitInspectResult>("git_inspect", { url, subdir: state.gitInstallDialog.subdir.trim() || null });
+    if (!state.gitInstallDialog) return;
+    state.gitInstallDialog.inspected = res;
+    state.gitInstallDialog.loading = false;
+    if (res.skills.length === 0 && res.mcpServers.length === 0) state.gitInstallDialog.error = "未在该仓库发现 Skill 或 MCP 声明";
     renderApp(true);
   } catch (e) {
-    if (!gitInstallDialog) return;
-    gitInstallDialog.loading = false;
-    gitInstallDialog.inspected = null;
-    gitInstallDialog.error = e instanceof Error ? e.message : String(e);
+    if (!state.gitInstallDialog) return;
+    state.gitInstallDialog.loading = false;
+    state.gitInstallDialog.inspected = null;
+    state.gitInstallDialog.error = e instanceof Error ? e.message : String(e);
     renderApp(true);
   }
 }
 
 async function gitApply(): Promise<void> {
-  if (!gitInstallDialog?.inspected || gitInstallDialog.loading) return;
-  const insp = gitInstallDialog.inspected;
+  if (!state.gitInstallDialog?.inspected || state.gitInstallDialog.loading) return;
+  const insp = state.gitInstallDialog.inspected;
   const skillRelPaths = [...document.querySelectorAll<HTMLInputElement>(".git-skill-check")]
     .filter((c) => c.checked)
     .map((c) => c.dataset.relPath ?? "")
@@ -657,7 +534,7 @@ async function gitApply(): Promise<void> {
     setSkillActionMessage("请为 MCP 选择目标客户端", 2600);
     return;
   }
-  gitInstallDialog.loading = true;
+  state.gitInstallDialog.loading = true;
   renderApp(true);
   try {
     const res = await invoke<GitApplyResult>("git_apply", {
@@ -667,12 +544,12 @@ async function gitApply(): Promise<void> {
       mcpServers,
       mcpClientId
     });
-    gitInstallDialog = null;
+    state.gitInstallDialog = null;
     await loadEnvironment(true);
     const failedText = res.failed.length ? `；失败：${res.failed.join(" / ")}` : "";
     setSkillActionMessage(`${res.message}${failedText}`, res.failed.length ? 6000 : 3000);
   } catch (e) {
-    if (gitInstallDialog) gitInstallDialog.loading = false;
+    if (state.gitInstallDialog) state.gitInstallDialog.loading = false;
     setSkillActionMessage(`安装失败：${e instanceof Error ? e.message : String(e)}`, 5200);
     renderApp(true);
   }
@@ -680,60 +557,60 @@ async function gitApply(): Promise<void> {
 
 async function adoptToLibrary(paths: string[]): Promise<void> {
   const unique = [...new Set(paths)].filter(Boolean);
-  if (unique.length === 0 || skillTransferBusy) return;
-  skillTransferBusy = true;
+  if (unique.length === 0 || state.skillTransferBusy) return;
+  state.skillTransferBusy = true;
   setSkillActionMessage(`正在收编 ${unique.length} 个 Skill 进中心库...`, 0);
   try {
-    const result = await invoke<LibraryOpResult>("adopt_skills_to_library", { paths: unique, extraRoots: scanRoots });
-    skillTransferBusy = false;
-    selectedSkillKeys.clear();
+    const result = await invoke<LibraryOpResult>("adopt_skills_to_library", { paths: unique, extraRoots: state.scanRoots });
+    state.skillTransferBusy = false;
+    state.selectedSkillKeys.clear();
     await loadEnvironment(true);
     const failedText = result.failed.length ? `；失败 ${result.failed.length}：${result.failed.join(" / ")}` : "";
     setSkillActionMessage(`${result.message}${failedText}`, result.failed.length ? 5200 : 2800);
   } catch (error) {
-    skillTransferBusy = false;
+    state.skillTransferBusy = false;
     setSkillActionMessage(`收编失败：${error instanceof Error ? error.message : String(error)}`, 5200);
   }
 }
 
 async function linkSkillToClients(skillPath: string, clientIds: string[]): Promise<void> {
-  if (clientIds.length === 0 || skillTransferBusy) return;
-  skillTransferBusy = true;
+  if (clientIds.length === 0 || state.skillTransferBusy) return;
+  state.skillTransferBusy = true;
   setSkillActionMessage("正在链接到客户端...", 0);
   try {
     const result = await invoke<LibraryOpResult>("link_skill_to_clients", { librarySkillPath: skillPath, clientIds });
-    skillTransferBusy = false;
-    skillLinkDialog = null;
+    state.skillTransferBusy = false;
+    state.skillLinkDialog = null;
     await loadEnvironment(true);
     const failedText = result.failed.length ? `；失败：${result.failed.join(" / ")}` : "";
     setSkillActionMessage(`${result.message}${failedText}`, result.failed.length ? 5200 : 2800);
   } catch (error) {
-    skillTransferBusy = false;
+    state.skillTransferBusy = false;
     setSkillActionMessage(`链接失败：${error instanceof Error ? error.message : String(error)}`, 5200);
   }
 }
 
 async function unlinkSkillFromClients(skillPath: string, clientIds: string[]): Promise<void> {
-  if (clientIds.length === 0 || skillTransferBusy) return;
-  skillTransferBusy = true;
+  if (clientIds.length === 0 || state.skillTransferBusy) return;
+  state.skillTransferBusy = true;
   setSkillActionMessage("正在移除链接...", 0);
   try {
     const result = await invoke<LibraryOpResult>("unlink_skill_from_clients", { librarySkillPath: skillPath, clientIds });
-    skillTransferBusy = false;
+    state.skillTransferBusy = false;
     await loadEnvironment(true);
     const failedText = result.failed.length ? `；失败：${result.failed.join(" / ")}` : "";
     setSkillActionMessage(`${result.message}${failedText}`, result.failed.length ? 5200 : 2800);
   } catch (error) {
-    skillTransferBusy = false;
+    state.skillTransferBusy = false;
     setSkillActionMessage(`移除链接失败：${error instanceof Error ? error.message : String(error)}`, 5200);
   }
 }
 
 async function transferSkills(paths: string[], targetClientId: string, action: SkillTransferAction): Promise<void> {
   const uniquePaths = [...new Set(paths)].filter(Boolean);
-  if (uniquePaths.length === 0 || !targetClientId || skillTransferBusy) return;
-  skillTransferBusy = true;
-  skillContextMenu = null;
+  if (uniquePaths.length === 0 || !targetClientId || state.skillTransferBusy) return;
+  state.skillTransferBusy = true;
+  state.skillContextMenu = null;
   const verb = action === "move" ? "移动" : "复制";
   setSkillActionMessage(`正在${verb} ${uniquePaths.length} 个 Skill...`, 0);
   try {
@@ -741,25 +618,25 @@ async function transferSkills(paths: string[], targetClientId: string, action: S
       paths: uniquePaths,
       targetClientId,
       action,
-      extraRoots: scanRoots
+      extraRoots: state.scanRoots
     });
     const done = action === "move" ? result.moved : result.copied;
     const failedText = result.failed.length ? `；失败 ${result.failed.length} 个：${result.failed.join(" / ")}` : "";
     const targetText = result.targetRoot ? `\n目标目录：${result.targetRoot}` : "";
     if (action === "move") {
       const removedPaths = new Set(uniquePaths);
-      for (const key of [...selectedSkillKeys]) {
-        if (removedPaths.has(key.slice(key.indexOf("::") + 2))) selectedSkillKeys.delete(key);
+      for (const key of [...state.selectedSkillKeys]) {
+        if (removedPaths.has(key.slice(key.indexOf("::") + 2))) state.selectedSkillKeys.delete(key);
       }
     }
-    skillTransferBusy = false;
+    state.skillTransferBusy = false;
     await loadEnvironment(true);
     setSkillActionMessage(
       `${action === "move" ? "移动" : "复制"}完成：成功 ${done} 个，目标客户端 ${result.targetClientName}${failedText}${targetText}`,
       result.failed.length ? 5200 : 2800
     );
   } catch (error) {
-    skillTransferBusy = false;
+    state.skillTransferBusy = false;
     setSkillActionMessage(`${verb}失败：${error instanceof Error ? error.message : String(error)}`, 5200);
   }
 }
@@ -778,30 +655,30 @@ async function startSkillImport(): Promise<void> {
     return;
   }
   if (!selected || Array.isArray(selected)) return;
-  importSkillDialog = { sourceDir: selected, targetClientId: preferredSkillTargetId(targets) };
+  state.importSkillDialog = { sourceDir: selected, targetClientId: preferredSkillTargetId(targets) };
   renderApp(true);
 }
 
 async function importSkill(sourceDir: string, targetClientId: string): Promise<void> {
-  if (!sourceDir || !targetClientId || skillTransferBusy) return;
-  skillTransferBusy = true;
-  importSkillDialog = null;
+  if (!sourceDir || !targetClientId || state.skillTransferBusy) return;
+  state.skillTransferBusy = true;
+  state.importSkillDialog = null;
   renderApp(true);
   setSkillActionMessage("正在导入 Skill...", 0);
   try {
     const result = await invoke<ImportSkillResult>("import_skill", { sourceDir, targetClientId });
-    skillTransferBusy = false;
+    state.skillTransferBusy = false;
     await loadEnvironment(true);
     setSkillActionMessage(`${result.message}`, 3200);
   } catch (error) {
-    skillTransferBusy = false;
+    state.skillTransferBusy = false;
     setSkillActionMessage(`导入失败：${error instanceof Error ? error.message : String(error)}`, 5200);
   }
 }
 
 async function installMarketSkill(skill: MarketSkill, method: InstallMethod, targetClientId: string): Promise<void> {
-  installingKey = `${skill.id}:${method.id}`;
-  installLogs[skill.id] = `正在执行：${method.detail}`;
+  state.installingKey = `${skill.id}:${method.id}`;
+  state.installLogs[skill.id] = `正在执行：${method.detail}`;
   renderApp();
   try {
     const result = await invoke<InstallResult>("install_market_skill", {
@@ -818,23 +695,23 @@ async function installMarketSkill(skill: MarketSkill, method: InstallMethod, tar
         targetClientId
       }
     });
-    installLogs[skill.id] = `${result.message}${result.installedPath ? `\n路径：${result.installedPath}` : ""}${result.log ? `\n${result.log.slice(-1200)}` : ""}`;
+    state.installLogs[skill.id] = `${result.message}${result.installedPath ? `\n路径：${result.installedPath}` : ""}${result.log ? `\n${result.log.slice(-1200)}` : ""}`;
     void loadEnvironment(true);
     void refreshInstalledMarketSkills();
     setSkillActionMessage(`${skill.name} 已安装到 ${clientNameById(targetClientId)}`, 3200);
   } catch (error) {
-    installLogs[skill.id] = `安装失败：${error instanceof Error ? error.message : String(error)}`;
+    state.installLogs[skill.id] = `安装失败：${error instanceof Error ? error.message : String(error)}`;
     setSkillActionMessage(`安装失败：${error instanceof Error ? error.message : String(error)}`, 5200);
   } finally {
-    installingKey = null;
+    state.installingKey = null;
     renderApp();
   }
 }
 
 async function installMcpServer(mcp: MarketMcp, targetClientId: string): Promise<void> {
-  if (!targetClientId || skillTransferBusy) return;
-  skillTransferBusy = true;
-  mcpInstallDialog = null;
+  if (!targetClientId || state.skillTransferBusy) return;
+  state.skillTransferBusy = true;
+  state.mcpInstallDialog = null;
   renderApp();
   setSkillActionMessage(`正在写入 MCP「${mcp.name}」...`, 0);
   try {
@@ -848,41 +725,41 @@ async function installMcpServer(mcp: MarketMcp, targetClientId: string): Promise
         url: mcp.url ?? null
       }
     });
-    skillTransferBusy = false;
+    state.skillTransferBusy = false;
     await loadEnvironment(true);
     setSkillActionMessage(`MCP「${mcp.name}」已写入 ${clientNameById(targetClientId)}`, 3200);
   } catch (error) {
-    skillTransferBusy = false;
+    state.skillTransferBusy = false;
     setSkillActionMessage(`MCP 写入失败：${error instanceof Error ? error.message : String(error)}`, 5200);
   }
 }
 
 async function toggleMcpEnabled(clientId: string, name: string, enabled: boolean): Promise<void> {
-  if (skillTransferBusy) return;
-  skillTransferBusy = true;
+  if (state.skillTransferBusy) return;
+  state.skillTransferBusy = true;
   setSkillActionMessage(`正在${enabled ? "启用" : "禁用"} ${name}...`, 0);
   try {
     await invoke<string>("set_mcp_enabled", { clientId, name, enabled });
-    skillTransferBusy = false;
+    state.skillTransferBusy = false;
     await loadEnvironment(true);
     setSkillActionMessage(`已${enabled ? "启用" : "禁用"} ${name}`, 2400);
   } catch (error) {
-    skillTransferBusy = false;
+    state.skillTransferBusy = false;
     setSkillActionMessage(`操作失败：${error instanceof Error ? error.message : String(error)}`, 5200);
   }
 }
 
 async function setAllMcpEnabled(enabled: boolean): Promise<void> {
-  if (skillTransferBusy) return;
-  skillTransferBusy = true;
+  if (state.skillTransferBusy) return;
+  state.skillTransferBusy = true;
   setSkillActionMessage(`正在${enabled ? "启用" : "禁用"}全部 MCP...`, 0);
   try {
     const message = await invoke<string>("set_all_mcp_enabled", { enabled });
-    skillTransferBusy = false;
+    state.skillTransferBusy = false;
     await loadEnvironment(true);
     setSkillActionMessage(`${message}`, 2800);
   } catch (error) {
-    skillTransferBusy = false;
+    state.skillTransferBusy = false;
     setSkillActionMessage(`操作失败：${error instanceof Error ? error.message : String(error)}`, 5200);
   }
 }
@@ -909,15 +786,15 @@ async function refreshInstalledMarketSkills(): Promise<void> {
         ids.add(skill.id);
       }
     }
-    installedMarketSkillIds = ids;
-    if (currentView === "market") renderApp(true);
+    state.installedMarketSkillIds = ids;
+    if (state.currentView === "market") renderApp(true);
   } catch {
     // 静默失败：未安装 npm 不影响其它功能
   }
 }
 
 async function exportClientConfig(clientId: string): Promise<void> {
-  clientMenuOpen = false;
+  state.clientMenuOpen = false;
   renderApp();
   let dir: string | string[] | null = null;
   try {
@@ -937,7 +814,7 @@ async function exportClientConfig(clientId: string): Promise<void> {
 }
 
 async function importClientConfig(clientId: string): Promise<void> {
-  clientMenuOpen = false;
+  state.clientMenuOpen = false;
   renderApp();
   let file: string | string[] | null = null;
   try {
@@ -976,18 +853,18 @@ function navIcon(name: string): string {
 function renderThemeSwitch(id: string, extraClass = ""): string {
   // size 会被组件换算成 --smr-toggle-width（width = round(size*64)）；侧栏用 1.375≈88px，与 CSS 盒子一致，避免内部按钮溢出。
   const size = extraClass.includes("settings") ? "1.95" : "1.375";
-  return `<smr-theme-button id="${id}" class="${extraClass}" value="${currentTheme}" size="${size}" data-theme-toggle></smr-theme-button>`;
+  return `<smr-theme-button id="${id}" class="${extraClass}" value="${state.currentTheme}" size="${size}" data-theme-toggle></smr-theme-button>`;
 }
 
 function renderSidebar(): string {
   const nav = navItems
     .map(([label, icon, view]) => `
-      <button class="nav-item ${view === currentView ? "is-active" : ""}" data-view="${view}" type="button">
+      <button class="nav-item ${view === state.currentView ? "is-active" : ""}" data-view="${view}" type="button">
         <span class="nav-icon">${navIcon(icon)}</span><span>${label}</span>${view === "wsl" ? `<span class="nav-beta">Beta</span>` : ""}
       </button>`)
     .join("");
   const updateReminder = visibleUpdateAvailable()
-    ? `<div class="sidebar-update-card"><button id="sidebar-update-open" type="button"><span>↑</span><strong>发现新版本</strong><small>v${html(updateInfo?.latestVersion ?? "")}</small></button><button id="sidebar-update-dismiss" type="button" title="忽略本版本">×</button></div>`
+    ? `<div class="sidebar-update-card"><button id="sidebar-update-open" type="button"><span>↑</span><strong>发现新版本</strong><small>v${html(state.updateInfo?.latestVersion ?? "")}</small></button><button id="sidebar-update-dismiss" type="button" title="忽略本版本">×</button></div>`
     : "";
   return `
     <aside class="sidebar">
@@ -1010,7 +887,7 @@ function renderClientsList(): string {
         ? `<span class="client-source-badge ${isWsl ? "wsl" : "custom"}">${isWsl ? "WSL" : "扩展"}</span>`
         : "";
       return `
-        <button class="client-row ${index === activeClientIndex ? "is-selected" : ""} ${installed ? "is-installed" : "is-missing"}" data-client-index="${index}" type="button">
+        <button class="client-row ${index === state.activeClientIndex ? "is-selected" : ""} ${installed ? "is-installed" : "is-missing"}" data-client-index="${index}" type="button">
           <span class="avatar mini image">${img(client.iconFile, client.name)}</span>
           <span class="client-row-copy"><strong>${html(client.name)}${badge}</strong><small>${installed ? `${rt?.mcpCount ?? 0} MCP / ${rt?.skillsCount ?? 0} Skills` : "未安装"}</small></span>
           <span class="client-status-dot ${installed ? "installed" : "missing"}"></span>
@@ -1020,9 +897,9 @@ function renderClientsList(): string {
   return `
     <section class="client-list-card">
       <div class="list-heading"><strong>全部客户端</strong><span>${list.length}</span></div>
-      ${detectionError ? `<div class="status-banner danger">检测失败：${html(detectionError)}</div>` : ""}
+      ${state.detectionError ? `<div class="status-banner danger">检测失败：${html(state.detectionError)}</div>` : ""}
       <div class="client-list">${rows}</div>
-      <button id="refresh-detection" class="text-action" type="button"><span>${svgIcon("refresh", 15)}</span>${detectionLoading ? "检测中..." : "重新检测"}</button>
+      <button id="refresh-detection" class="text-action" type="button"><span>${svgIcon("refresh", 15)}</span>${state.detectionLoading ? "检测中..." : "重新检测"}</button>
     </section>`;
 }
 
@@ -1060,7 +937,7 @@ function renderInstallRequired(client: Client, rt?: RuntimeClient): string {
 
 function renderClientTabButton(tab: ClientTab, label: string, count?: number): string {
   const suffix = typeof count === "number" ? `<span>${count}</span>` : "";
-  return `<button class="tab ${activeClientTab === tab ? "is-active" : ""}" data-client-tab="${tab}" type="button">${label}${suffix}</button>`;
+  return `<button class="tab ${state.activeClientTab === tab ? "is-active" : ""}" data-client-tab="${tab}" type="button">${label}${suffix}</button>`;
 }
 
 function renderClientSkillRow(skill: RuntimeSkill): string {
@@ -1162,11 +1039,11 @@ function renderClientMain(client: Client): string {
   const skills = clientSkills(client.id);
   const rules = clientRules(client.id);
   const tabContent =
-    activeClientTab === "skills"
+    state.activeClientTab === "skills"
       ? renderClientSkillsPanel(client, skills)
-      : activeClientTab === "mcp"
+      : state.activeClientTab === "mcp"
         ? renderClientMcpPanel(mcps)
-        : activeClientTab === "rules"
+        : state.activeClientTab === "rules"
           ? renderClientRulesPanel(client, rules)
           : renderClientSettingsPanel(client, rt);
   return `
@@ -1176,7 +1053,7 @@ function renderClientMain(client: Client): string {
           <span class="avatar large image">${img(client.iconFile, client.name)}</span>
           <div><h2>${html(client.name)}</h2></div>
         </div>
-        <div class="hero-actions"><button class="primary-button launch-client-button" data-client-id="${html(client.id)}" type="button" ${canLaunch ? "" : "disabled"}>${canLaunch ? "▶ 启动客户端" : installed ? "未找到启动程序" : "需要安装客户端"}</button><div class="client-menu-wrap"><button id="client-actions-toggle" class="ghost-dots ${clientMenuOpen ? "is-open" : ""}" type="button">${svgIcon("more", 18)}</button>${clientMenuOpen ? `<div class="client-menu" role="menu"><button class="client-menu-item" data-client-action="export" data-client-id="${html(client.id)}" type="button" ${installed ? "" : "disabled"}>导出配置</button><button class="client-menu-item" data-client-action="import" data-client-id="${html(client.id)}" type="button" ${installed ? "" : "disabled"}>导入配置</button><button class="client-menu-item danger" data-client-action="delete" data-client-id="${html(client.id)}" type="button" ${installed ? "" : "disabled"}>删除客户端</button></div>` : ""}</div></div>
+        <div class="hero-actions"><button class="primary-button launch-client-button" data-client-id="${html(client.id)}" type="button" ${canLaunch ? "" : "disabled"}>${canLaunch ? "▶ 启动客户端" : installed ? "未找到启动程序" : "需要安装客户端"}</button><div class="client-menu-wrap"><button id="client-actions-toggle" class="ghost-dots ${state.clientMenuOpen ? "is-open" : ""}" type="button">${svgIcon("more", 18)}</button>${state.clientMenuOpen ? `<div class="client-menu" role="menu"><button class="client-menu-item" data-client-action="export" data-client-id="${html(client.id)}" type="button" ${installed ? "" : "disabled"}>导出配置</button><button class="client-menu-item" data-client-action="import" data-client-id="${html(client.id)}" type="button" ${installed ? "" : "disabled"}>导入配置</button><button class="client-menu-item danger" data-client-action="delete" data-client-id="${html(client.id)}" type="button" ${installed ? "" : "disabled"}>删除客户端</button></div>` : ""}</div></div>
       </div>
       ${
         !installed
@@ -1218,7 +1095,7 @@ function renderInspector(client: Client): string {
 }
 
 function renderClientView(): string {
-  const client = displayClients()[activeClientIndex] ?? clients[0];
+  const client = displayClients()[state.activeClientIndex] ?? clients[0];
   return `<main class="workspace"><div class="dashboard-grid">${renderClientsList()}${renderClientMain(client)}${renderInspector(client)}</div></main>`;
 }
 
@@ -1228,57 +1105,57 @@ function wslTag(distro: string): string {
 }
 function wslInstanceSkills(distro: string): RuntimeSkill[] {
   const suffix = `@${wslTag(distro)}`;
-  return (environment?.skills ?? []).filter((s) => s.clientId.endsWith(suffix));
+  return (state.environment?.skills ?? []).filter((s) => s.clientId.endsWith(suffix));
 }
 function wslInstanceMcps(distro: string): RuntimeMcpServer[] {
   const suffix = `@${wslTag(distro)}`;
-  return (environment?.mcpServers ?? []).filter((s) => s.clientId.endsWith(suffix));
+  return (state.environment?.mcpServers ?? []).filter((s) => s.clientId.endsWith(suffix));
 }
 function wslInstanceRules(distro: string): RuntimeRule[] {
   const suffix = `@${wslTag(distro)}`;
-  return (environment?.rules ?? []).filter((r) => r.clientId.endsWith(suffix));
+  return (state.environment?.rules ?? []).filter((r) => r.clientId.endsWith(suffix));
 }
 
 async function loadWslInstances(): Promise<void> {
-  if (wslDetecting) return;
-  wslDetecting = true;
-  wslDetectError = null;
+  if (state.wslDetecting) return;
+  state.wslDetecting = true;
+  state.wslDetectError = null;
   renderApp(true);
   try {
-    wslDistros = await invoke<WslDistro[]>("list_wsl_distros");
-    wslInstancesLoaded = true;
-    if (wslDistros.length === 0) wslDetectError = "未检测到 WSL 发行版（需安装 WSL）";
-    if (!wslDistros.some((d) => d.distro === activeWslDistro)) {
-      const pick = wslDistros.find((d) => d.isDefault) ?? wslDistros.find((d) => d.running) ?? wslDistros[0];
-      activeWslDistro = pick?.distro ?? "";
+    state.wslDistros = await invoke<WslDistro[]>("list_wsl_distros");
+    state.wslInstancesLoaded = true;
+    if (state.wslDistros.length === 0) state.wslDetectError = "未检测到 WSL 发行版（需安装 WSL）";
+    if (!state.wslDistros.some((d) => d.distro === state.activeWslDistro)) {
+      const pick = state.wslDistros.find((d) => d.isDefault) ?? state.wslDistros.find((d) => d.running) ?? state.wslDistros[0];
+      state.activeWslDistro = pick?.distro ?? "";
     }
     ensureWslScanned();
   } catch (error) {
-    wslDistros = [];
-    wslInstancesLoaded = true;
-    wslDetectError = error instanceof Error ? error.message : String(error);
+    state.wslDistros = [];
+    state.wslInstancesLoaded = true;
+    state.wslDetectError = error instanceof Error ? error.message : String(error);
   } finally {
-    wslDetecting = false;
+    state.wslDetecting = false;
     renderApp(true);
   }
 }
 
-// 确保当前选中的运行中实例已纳入扫描根，使 environment 含其 Skills/MCP/Rules。
+// 确保当前选中的运行中实例已纳入扫描根，使 state.environment 含其 Skills/MCP/Rules。
 function ensureWslScanned(): void {
-  const inst = wslDistros.find((d) => d.distro === activeWslDistro);
+  const inst = state.wslDistros.find((d) => d.distro === state.activeWslDistro);
   if (!inst || !inst.running || !inst.homeUnc) return;
   const tag = wslTag(inst.distro);
-  if (!scanRoots.some((r) => r.tag === tag)) {
-    scanRoots = [...scanRoots, { tag, label: `WSL: ${inst.distro}`, path: inst.homeUnc, kind: "wsl" }];
+  if (!state.scanRoots.some((r) => r.tag === tag)) {
+    state.scanRoots = [...state.scanRoots, { tag, label: `WSL: ${inst.distro}`, path: inst.homeUnc, kind: "wsl" }];
     saveScanRoots();
     void loadEnvironment(true);
   }
 }
 
 function selectWslDistro(name: string): void {
-  activeWslDistro = name;
-  selectedWslSkillPath = "";
-  activeWslTab = "skills";
+  state.activeWslDistro = name;
+  state.selectedWslSkillPath = "";
+  state.activeWslTab = "skills";
   ensureWslScanned();
   renderApp(true);
 }
@@ -1294,16 +1171,16 @@ async function wslControl(command: string, distro: string, okMsg: string): Promi
 }
 
 function renderWslView(): string {
-  if (!wslInstancesLoaded && !wslDetecting) {
+  if (!state.wslInstancesLoaded && !state.wslDetecting) {
     void loadWslInstances();
   }
   return `<main class="workspace"><div class="dashboard-grid">${renderWslInstanceList()}${renderWslMain()}${renderWslInspector()}</div></main>`;
 }
 
 function renderWslInstanceList(): string {
-  const rows = wslDistros
+  const rows = state.wslDistros
     .map((d) => {
-      const active = d.distro === activeWslDistro;
+      const active = d.distro === state.activeWslDistro;
       return `<button class="client-row ${active ? "is-selected" : ""}" data-wsl-distro="${html(d.distro)}" type="button">
         <span class="wsl-status-dot ${d.running ? "running" : "stopped"}"></span>
         <span class="client-row-copy"><strong>${html(d.distro)}${d.isDefault ? `<span class="wsl-default-tag">默认</span>` : ""}</strong><small>${d.running ? "运行中" : "已停止"}</small></span>
@@ -1311,16 +1188,16 @@ function renderWslInstanceList(): string {
     })
     .join("");
   return `<section class="client-list-card">
-    <div class="list-heading"><strong>WSL 实例</strong><span>${wslDistros.length}</span></div>
-    ${wslDetectError ? `<div class="status-banner danger">${html(wslDetectError)}</div>` : ""}
-    <div class="client-list">${rows || `<div class="empty-config-panel">${wslDetecting ? "检测中..." : "未检测到 WSL 发行版"}</div>`}</div>
-    <button id="refresh-wsl" class="text-action" type="button"><span>${svgIcon("refresh", 15)}</span>${wslDetecting ? "检测中..." : "刷新实例"}</button>
+    <div class="list-heading"><strong>WSL 实例</strong><span>${state.wslDistros.length}</span></div>
+    ${state.wslDetectError ? `<div class="status-banner danger">${html(state.wslDetectError)}</div>` : ""}
+    <div class="client-list">${rows || `<div class="empty-config-panel">${state.wslDetecting ? "检测中..." : "未检测到 WSL 发行版"}</div>`}</div>
+    <button id="refresh-wsl" class="text-action" type="button"><span>${svgIcon("refresh", 15)}</span>${state.wslDetecting ? "检测中..." : "刷新实例"}</button>
     <a class="wsl-help-link" href="https://learn.microsoft.com/windows/wsl/" target="_blank" rel="noreferrer">如何管理 WSL 实例?</a>
   </section>`;
 }
 
 function renderWslMain(): string {
-  const inst = wslDistros.find((d) => d.distro === activeWslDistro);
+  const inst = state.wslDistros.find((d) => d.distro === state.activeWslDistro);
   if (!inst) {
     return `<section class="client-main-card"><div class="empty-config-panel">请选择左侧的 WSL 实例。</div></section>`;
   }
@@ -1328,17 +1205,17 @@ function renderWslMain(): string {
   const mcps = wslInstanceMcps(inst.distro);
   const rules = wslInstanceRules(inst.distro);
   const tab = (id: string, label: string, count?: number) =>
-    `<button class="tab ${activeWslTab === id ? "is-active" : ""}" data-wsl-tab="${id}" type="button">${label}${count !== undefined ? `<span>${count}</span>` : ""}</button>`;
+    `<button class="tab ${state.activeWslTab === id ? "is-active" : ""}" data-wsl-tab="${id}" type="button">${label}${count !== undefined ? `<span>${count}</span>` : ""}</button>`;
 
   let content = "";
   if (!inst.running) {
     content = `<div class="install-required inline"><div class="install-required-icon">!</div><div><h3>该发行版未运行</h3><p>启动后才能读取其中的 Skills / MCP / Rules。</p><button class="primary-button" data-wsl-start="${html(inst.distro)}" type="button">启动 ${html(inst.distro)}</button></div></div>`;
-  } else if (activeWslTab === "skills") {
+  } else if (state.activeWslTab === "skills") {
     content = `<div class="skill-list-table">${
       skills.length
         ? skills
             .map(
-              (s) => `<article class="skill-list-row wsl-skill-row ${selectedWslSkillPath === s.path ? "is-selected" : ""}" data-wsl-skill-path="${html(s.path)}">
+              (s) => `<article class="skill-list-row wsl-skill-row ${state.selectedWslSkillPath === s.path ? "is-selected" : ""}" data-wsl-skill-path="${html(s.path)}">
         <div class="skill-row-icon ${skillTone(s)}">${html(skillInitials(s.name))}</div>
         <div class="skill-row-main">
           <div class="skill-row-title"><strong>${html(s.name)}</strong></div>
@@ -1353,11 +1230,11 @@ function renderWslMain(): string {
             .join("")
         : `<div class="empty-config-panel">该实例未检测到 Skills。</div>`
     }</div>`;
-  } else if (activeWslTab === "mcp") {
+  } else if (state.activeWslTab === "mcp") {
     content = `<div class="tool-stack">${mcps.length ? mcps.map(renderDetectedMcp).join("") : `<div class="empty-config-panel">该实例未检测到 MCP。</div>`}</div>`;
-  } else if (activeWslTab === "rules") {
+  } else if (state.activeWslTab === "rules") {
     content = `<div class="rule-list-table">${rules.length ? rules.map(renderRuleListRow).join("") : `<div class="empty-config-panel">该实例未检测到 Rules。</div>`}</div>`;
-  } else if (activeWslTab === "settings") {
+  } else if (state.activeWslTab === "settings") {
     content = `<div class="info-card"><dl>
       <dt>发行版</dt><dd>${html(inst.distro)}</dd>
       <dt>用户</dt><dd>${html(inst.user || "—")}</dd>
@@ -1378,8 +1255,8 @@ function renderWslMain(): string {
       <div class="hero-left"><span class="avatar large wsl-avatar">🐧</span><div><h2>${html(inst.distro)}</h2><small class="wsl-sub">${inst.running ? "运行中" : "已停止"}${inst.isDefault ? " · 默认" : ""}</small></div></div>
       <div class="hero-actions">
         <button class="secondary-button" data-wsl-terminal="${html(inst.distro)}" type="button">⎘ 在终端中打开</button>
-        <div class="client-menu-wrap"><button id="wsl-actions-toggle" class="ghost-dots ${clientMenuOpen ? "is-open" : ""}" type="button">${svgIcon("more", 18)}</button>${
-          clientMenuOpen
+        <div class="client-menu-wrap"><button id="wsl-actions-toggle" class="ghost-dots ${state.clientMenuOpen ? "is-open" : ""}" type="button">${svgIcon("more", 18)}</button>${
+          state.clientMenuOpen
             ? `<div class="client-menu" role="menu">
           <button class="client-menu-item" data-wsl-default="${html(inst.distro)}" type="button" ${inst.isDefault ? "disabled" : ""}>设为默认</button>
           ${inst.running ? `<button class="client-menu-item" data-wsl-stop="${html(inst.distro)}" type="button">停止</button>` : `<button class="client-menu-item" data-wsl-start="${html(inst.distro)}" type="button">启动</button>`}
@@ -1400,7 +1277,7 @@ function renderWslMain(): string {
 }
 
 function renderWslInspector(): string {
-  const skill = selectedWslSkillPath ? (environment?.skills ?? []).find((s) => s.path === selectedWslSkillPath) : undefined;
+  const skill = state.selectedWslSkillPath ? (state.environment?.skills ?? []).find((s) => s.path === state.selectedWslSkillPath) : undefined;
   if (!skill) {
     return `<aside class="inspector"><section class="info-card"><h3>Skill 信息</h3><p class="placeholder-copy">在中间列选择一个 Skill 查看详情。</p></section></aside>`;
   }
@@ -1430,7 +1307,7 @@ function renderWslInspector(): string {
 }
 
 function renderMcpView(): string {
-  const rows = (environment?.mcpServers ?? []).map(renderDetectedMcp).join("");
+  const rows = (state.environment?.mcpServers ?? []).map(renderDetectedMcp).join("");
   return `
     <main class="workspace single-column-workspace"><section class="client-main-card management-card">
       <div class="client-hero"><div class="hero-left"><span class="avatar large">M</span><div><h2>MCP 管理</h2><p>从已安装客户端配置中读取真实 MCP 服务。可点击状态切换启用/禁用。</p></div></div><div class="mcp-hero-actions"><button id="disable-all-mcp" class="secondary-button" type="button">一键禁用所有 MCP</button><button id="enable-all-mcp" class="secondary-button" type="button">全部启用</button><button id="refresh-detection" class="secondary-button" type="button">重新检测</button></div></div>
@@ -1454,7 +1331,7 @@ function renderRuleListRow(rule: RuntimeRule): string {
 }
 
 function renderRulesView(): string {
-  const rules = environment?.rules ?? [];
+  const rules = state.environment?.rules ?? [];
   const clientsWithRules = [...new Map(rules.map((rule) => [rule.clientId, rule.clientName])).entries()];
   const workspaceRules = rules.filter((rule) => rule.managed).length;
   const recent = rules
@@ -1464,10 +1341,10 @@ function renderRulesView(): string {
   const sortedRules = rules
     .slice()
     .sort((a, b) => Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0));
-  const ruleTotalPages = Math.max(1, Math.ceil(sortedRules.length / listPageSize));
-  const rulePageNum = Math.min(Math.max(rulePage, 1), ruleTotalPages);
+  const ruleTotalPages = Math.max(1, Math.ceil(sortedRules.length / state.listPageSize));
+  const rulePageNum = Math.min(Math.max(state.rulePage, 1), ruleTotalPages);
   const rows = sortedRules
-    .slice((rulePageNum - 1) * listPageSize, rulePageNum * listPageSize)
+    .slice((rulePageNum - 1) * state.listPageSize, rulePageNum * state.listPageSize)
     .map(renderRuleListRow)
     .join("");
   return `
@@ -1528,55 +1405,55 @@ function renderPager(scope: "skill" | "rule", page: number, totalPages: number):
     <button class="pager-btn is-active" type="button" disabled>${page} / ${totalPages}</button>
     <button class="pager-btn" data-pager="${scope}" data-page="next" type="button" ${page >= totalPages ? "disabled" : ""}>${svgIcon("chevron-right", 15)}</button>
     <select class="skills-mini-select pager-size" data-pager-size="${scope}">
-      ${[10, 20, 50].map((n) => `<option value="${n}" ${listPageSize === n ? "selected" : ""}>${n} 条/页</option>`).join("")}
+      ${[10, 20, 50].map((n) => `<option value="${n}" ${state.listPageSize === n ? "selected" : ""}>${n} 条/页</option>`).join("")}
     </select>
   </div>`;
 }
 
 function renderSkillsView(): string {
-  const skills = environment?.skills ?? [];
+  const skills = state.environment?.skills ?? [];
   const installed = installedClients();
   const sharedSkillCount = skills.filter((skill) => skill.managed).length;
-  const query = skillQuery.trim().toLowerCase();
+  const query = state.skillQuery.trim().toLowerCase();
   const clientsWithSkills = [...new Map(skills.map((skill) => [skill.clientId, skill.clientName])).entries()];
   const allTags = [...new Set(skills.flatMap((skill) => skill.tags ?? []))].sort((a, b) => a.localeCompare(b, "zh"));
-  if (skillTagFilter !== "all" && !allTags.includes(skillTagFilter)) skillTagFilter = "all";
-  const activeGroup = activeSkillGroupId ? findSkillGroup(activeSkillGroupId) : undefined;
-  if (activeSkillGroupId && !activeGroup) activeSkillGroupId = "";
+  if (state.skillTagFilter !== "all" && !allTags.includes(state.skillTagFilter)) state.skillTagFilter = "all";
+  const activeGroup = state.activeSkillGroupId ? findSkillGroup(state.activeSkillGroupId) : undefined;
+  if (state.activeSkillGroupId && !activeGroup) state.activeSkillGroupId = "";
   const activeGroupKeys = activeGroup ? new Set(activeGroup.memberKeys) : null;
   const filteredSkills = skills
     .filter((skill) => {
       const haystack = `${skill.name} ${skill.description ?? ""} ${skill.clientName} ${skill.directory} ${skill.path}`.toLowerCase();
       const matchesQuery = !query || haystack.includes(query);
-      const matchesClient = skillClientFilter === "all" || skill.clientId === skillClientFilter;
+      const matchesClient = state.skillClientFilter === "all" || skill.clientId === state.skillClientFilter;
       const matchesStatus =
-        skillStatusFilter === "all" ||
-        (skillStatusFilter === "library" && skill.clientId === "library") ||
-        (skillStatusFilter === "shared" && skill.managed && skill.clientId !== "library") ||
-        (skillStatusFilter === "client" && !skill.managed);
-      const matchesTag = skillTagFilter === "all" || (skill.tags ?? []).includes(skillTagFilter);
+        state.skillStatusFilter === "all" ||
+        (state.skillStatusFilter === "library" && skill.clientId === "library") ||
+        (state.skillStatusFilter === "shared" && skill.managed && skill.clientId !== "library") ||
+        (state.skillStatusFilter === "client" && !skill.managed);
+      const matchesTag = state.skillTagFilter === "all" || (skill.tags ?? []).includes(state.skillTagFilter);
       const matchesGroup = !activeGroupKeys || activeGroupKeys.has(skillKey(skill));
       return matchesQuery && matchesClient && matchesStatus && matchesTag && matchesGroup;
     })
     .sort((a, b) => Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0));
-  const totalPages = Math.max(1, Math.ceil(filteredSkills.length / listPageSize));
-  const skillPageNum = Math.min(Math.max(skillPage, 1), totalPages);
-  const pageSkills = filteredSkills.slice((skillPageNum - 1) * listPageSize, skillPageNum * listPageSize);
-  const selectedVisibleCount = pageSkills.filter((skill) => selectedSkillKeys.has(skillKey(skill))).length;
+  const totalPages = Math.max(1, Math.ceil(filteredSkills.length / state.listPageSize));
+  const skillPageNum = Math.min(Math.max(state.skillPage, 1), totalPages);
+  const pageSkills = filteredSkills.slice((skillPageNum - 1) * state.listPageSize, skillPageNum * state.listPageSize);
+  const selectedVisibleCount = pageSkills.filter((skill) => state.selectedSkillKeys.has(skillKey(skill))).length;
   const allVisibleSelected = pageSkills.length > 0 && selectedVisibleCount === pageSkills.length;
   const bulkTargets = skillTargetClients();
   const bulkTargetId = preferredSkillTargetId(bulkTargets);
-  if (bulkTargetId && skillBulkTargetId !== bulkTargetId && !bulkTargets.some((client) => client.id === skillBulkTargetId)) {
-    skillBulkTargetId = bulkTargetId;
+  if (bulkTargetId && state.skillBulkTargetId !== bulkTargetId && !bulkTargets.some((client) => client.id === state.skillBulkTargetId)) {
+    state.skillBulkTargetId = bulkTargetId;
   }
   // WSL/扩展根来源的 skill 只读：禁止删除/移动（=从 WSL 删源），仅允许复制到 Windows。
-  const wslSkillKeys = new Set((environment?.skills ?? []).filter(isExtraSourceSkill).map(skillKey));
-  const selectionHasExtra = [...selectedSkillKeys].some((key) => wslSkillKeys.has(key));
+  const wslSkillKeys = new Set((state.environment?.skills ?? []).filter(isExtraSourceSkill).map(skillKey));
+  const selectionHasExtra = [...state.selectedSkillKeys].some((key) => wslSkillKeys.has(key));
   const rows = pageSkills
     .map(
       (skill) => {
         const key = skillKey(skill);
-        const selected = selectedSkillKeys.has(key);
+        const selected = state.selectedSkillKeys.has(key);
         const isExtra = isExtraSourceSkill(skill);
         const isLibrary = skill.clientId === "library";
         const linkedBadges =
@@ -1598,7 +1475,7 @@ function renderSkillsView(): string {
             : ""
         }${
           !isLibrary && !isExtra
-            ? `<button class="ghost-mini-button" data-adopt-skill-path="${html(skill.path)}" type="button" ${skillTransferBusy ? "disabled" : ""}>收编进库</button>`
+            ? `<button class="ghost-mini-button" data-adopt-skill-path="${html(skill.path)}" type="button" ${state.skillTransferBusy ? "disabled" : ""}>收编进库</button>`
             : ""
         }</div>`;
         return `
@@ -1616,7 +1493,7 @@ function renderSkillsView(): string {
         </div>
         <div class="skill-row-meta source"><span>客户端</span><strong>${html(skill.clientName)}</strong></div>
         <div class="skill-row-meta updated"><span>更新时间</span><strong>${formatUpdated(skill.updatedAt)}</strong></div>
-        <button class="skill-delete-button" data-delete-skill-path="${html(skill.path)}" data-skill-name="${html(skill.name)}" type="button" ${deleteBusy || isExtra ? "disabled" : ""} ${isExtra ? 'title="WSL/扩展来源只读，不能删除"' : ""}>删除</button>
+        <button class="skill-delete-button" data-delete-skill-path="${html(skill.path)}" data-skill-name="${html(skill.name)}" type="button" ${state.deleteBusy || isExtra ? "disabled" : ""} ${isExtra ? 'title="WSL/扩展来源只读，不能删除"' : ""}>删除</button>
       </article>`;
       }
     )
@@ -1635,34 +1512,34 @@ function renderSkillsView(): string {
         <article><strong>按来源</strong><b>${clientsWithSkills.length}</b><span>客户端 / 共享目录</span><i>▦</i></article>
       </div>
       <div class="skills-toolbar">
-        <label class="skills-search-box"><span>${svgIcon("search", 16)}</span><input id="skill-search-input" value="${html(skillQuery)}" placeholder="搜索 Skills..." /></label>
+        <label class="skills-search-box"><span>${svgIcon("search", 16)}</span><input id="skill-search-input" value="${html(state.skillQuery)}" placeholder="搜索 Skills..." /></label>
         <select id="skill-client-filter" class="skills-select">
-          <option value="all" ${skillClientFilter === "all" ? "selected" : ""}>全部客户端</option>
-          ${clientsWithSkills.map(([id, name]) => `<option value="${html(id)}" ${skillClientFilter === id ? "selected" : ""}>${html(name)}</option>`).join("")}
+          <option value="all" ${state.skillClientFilter === "all" ? "selected" : ""}>全部客户端</option>
+          ${clientsWithSkills.map(([id, name]) => `<option value="${html(id)}" ${state.skillClientFilter === id ? "selected" : ""}>${html(name)}</option>`).join("")}
         </select>
         <select id="skill-status-filter" class="skills-select">
-          <option value="all" ${skillStatusFilter === "all" ? "selected" : ""}>全部状态</option>
-          <option value="library" ${skillStatusFilter === "library" ? "selected" : ""}>中心库</option>
-          <option value="client" ${skillStatusFilter === "client" ? "selected" : ""}>客户端目录</option>
-          <option value="shared" ${skillStatusFilter === "shared" ? "selected" : ""}>共享目录</option>
+          <option value="all" ${state.skillStatusFilter === "all" ? "selected" : ""}>全部状态</option>
+          <option value="library" ${state.skillStatusFilter === "library" ? "selected" : ""}>中心库</option>
+          <option value="client" ${state.skillStatusFilter === "client" ? "selected" : ""}>客户端目录</option>
+          <option value="shared" ${state.skillStatusFilter === "shared" ? "selected" : ""}>共享目录</option>
         </select>
         ${
           allTags.length > 0
             ? `<select id="skill-tag-filter" class="skills-select" title="按标签筛选（来自 SKILL.md）">
-          <option value="all" ${skillTagFilter === "all" ? "selected" : ""}>全部标签</option>
-          ${allTags.map((tag) => `<option value="${html(tag)}" ${skillTagFilter === tag ? "selected" : ""}>${html(tag)}</option>`).join("")}
+          <option value="all" ${state.skillTagFilter === "all" ? "selected" : ""}>全部标签</option>
+          ${allTags.map((tag) => `<option value="${html(tag)}" ${state.skillTagFilter === tag ? "selected" : ""}>${html(tag)}</option>`).join("")}
         </select>`
             : ""
         }
-        <button class="skills-view-button ${!skillGridView ? "is-active" : ""}" data-skill-view="list" type="button">☷</button><button class="skills-view-button ${skillGridView ? "is-active" : ""}" data-skill-view="grid" type="button">▦</button>
+        <button class="skills-view-button ${!state.skillGridView ? "is-active" : ""}" data-skill-view="list" type="button">☷</button><button class="skills-view-button ${state.skillGridView ? "is-active" : ""}" data-skill-view="grid" type="button">▦</button>
       </div>
       <div class="skills-groups-bar">
         <span class="skills-groups-label">分组</span>
-        <button class="skill-group-chip ${activeSkillGroupId === "" ? "is-active" : ""}" data-group-select="" type="button">全部 (${skills.length})</button>
-        ${skillGroups
+        <button class="skill-group-chip ${state.activeSkillGroupId === "" ? "is-active" : ""}" data-group-select="" type="button">全部 (${skills.length})</button>
+        ${state.skillGroups
           .map(
-            (group) => `<span class="skill-group-chip-wrap ${activeSkillGroupId === group.id ? "is-active" : ""}">
-          <button class="skill-group-chip ${activeSkillGroupId === group.id ? "is-active" : ""}" data-group-select="${html(group.id)}" type="button" title="筛选分组「${html(group.name)}」">${html(group.name)} (${groupMemberCount(group)})</button>
+            (group) => `<span class="skill-group-chip-wrap ${state.activeSkillGroupId === group.id ? "is-active" : ""}">
+          <button class="skill-group-chip ${state.activeSkillGroupId === group.id ? "is-active" : ""}" data-group-select="${html(group.id)}" type="button" title="筛选分组「${html(group.name)}」">${html(group.name)} (${groupMemberCount(group)})</button>
           <button class="skill-group-mini" data-group-rename="${html(group.id)}" type="button" title="重命名">✎</button>
           <button class="skill-group-mini" data-group-delete="${html(group.id)}" type="button" title="删除分组">✕</button>
         </span>`
@@ -1672,24 +1549,24 @@ function renderSkillsView(): string {
       </div>
       <div class="skills-bulk-bar">
         <label><input id="select-all-skills" type="checkbox" ${allVisibleSelected ? "checked" : ""} ${filteredSkills.length === 0 ? "disabled" : ""} /> 全选当前列表</label>
-        <span>已选 ${selectedSkillKeys.size} 项</span>
-        <select id="add-to-group-select" class="skills-mini-select" title="把选中的 Skill 加入分组" ${selectedSkillKeys.size === 0 ? "disabled" : ""}>
+        <span>已选 ${state.selectedSkillKeys.size} 项</span>
+        <select id="add-to-group-select" class="skills-mini-select" title="把选中的 Skill 加入分组" ${state.selectedSkillKeys.size === 0 ? "disabled" : ""}>
           <option value="">加入分组…</option>
-          ${skillGroups.map((group) => `<option value="${html(group.id)}">＋ ${html(group.name)}</option>`).join("")}
+          ${state.skillGroups.map((group) => `<option value="${html(group.id)}">＋ ${html(group.name)}</option>`).join("")}
           <option value="__new__">＋ 新建分组并加入</option>
         </select>
-        ${activeGroup ? `<button id="remove-from-group" class="ghost-mini-button" type="button" ${selectedSkillKeys.size === 0 ? "disabled" : ""}>从「${html(activeGroup.name)}」移除</button>` : ""}
+        ${activeGroup ? `<button id="remove-from-group" class="ghost-mini-button" type="button" ${state.selectedSkillKeys.size === 0 ? "disabled" : ""}>从「${html(activeGroup.name)}」移除</button>` : ""}
         <span class="bulk-target-label">复制/移动到</span>
         <select id="bulk-skill-target" class="skills-mini-select" title="批量复制/移动的目标客户端（这不是筛选；筛选在上方工具栏）" ${bulkTargets.length === 0 ? "disabled" : ""}>
           ${bulkTargets.map((client) => `<option value="${html(client.id)}" ${bulkTargetId === client.id ? "selected" : ""}>${html(client.name)}</option>`).join("")}
         </select>
-        ${activeGroup ? `<button id="assign-group" class="transfer-mini-button assign-group-button" type="button" title="把分组「${html(activeGroup.name)}」全部复制到目标客户端" ${groupMemberCount(activeGroup) === 0 || skillTransferBusy || !bulkTargetId ? "disabled" : ""}>一键赋予整组到目标</button>` : ""}
-        <button id="copy-selected-skills" class="ghost-mini-button transfer-mini-button" type="button" ${selectedSkillKeys.size === 0 || skillTransferBusy || !bulkTargetId ? "disabled" : ""}>批量复制到</button>
-        <button id="move-selected-skills" class="ghost-mini-button transfer-mini-button" type="button" ${selectedSkillKeys.size === 0 || skillTransferBusy || !bulkTargetId || selectionHasExtra ? "disabled" : ""} ${selectionHasExtra ? 'title="WSL/扩展来源只读，不能移动；可用“批量复制到”"' : ""}>批量移动到</button>
-        <button id="delete-selected-skills" class="danger-mini-button" type="button" ${selectedSkillKeys.size === 0 || deleteBusy || selectionHasExtra ? "disabled" : ""} ${selectionHasExtra ? 'title="WSL/扩展来源只读，不能删除"' : ""}>${deleteBusy ? "删除中..." : "批量删除"}</button>
-        <button id="clear-skill-selection" class="ghost-mini-button" type="button" ${selectedSkillKeys.size === 0 ? "disabled" : ""}>清空选择</button>
+        ${activeGroup ? `<button id="assign-group" class="transfer-mini-button assign-group-button" type="button" title="把分组「${html(activeGroup.name)}」全部复制到目标客户端" ${groupMemberCount(activeGroup) === 0 || state.skillTransferBusy || !bulkTargetId ? "disabled" : ""}>一键赋予整组到目标</button>` : ""}
+        <button id="copy-selected-skills" class="ghost-mini-button transfer-mini-button" type="button" ${state.selectedSkillKeys.size === 0 || state.skillTransferBusy || !bulkTargetId ? "disabled" : ""}>批量复制到</button>
+        <button id="move-selected-skills" class="ghost-mini-button transfer-mini-button" type="button" ${state.selectedSkillKeys.size === 0 || state.skillTransferBusy || !bulkTargetId || selectionHasExtra ? "disabled" : ""} ${selectionHasExtra ? 'title="WSL/扩展来源只读，不能移动；可用“批量复制到”"' : ""}>批量移动到</button>
+        <button id="delete-selected-skills" class="danger-mini-button" type="button" ${state.selectedSkillKeys.size === 0 || state.deleteBusy || selectionHasExtra ? "disabled" : ""} ${selectionHasExtra ? 'title="WSL/扩展来源只读，不能删除"' : ""}>${state.deleteBusy ? "删除中..." : "批量删除"}</button>
+        <button id="clear-skill-selection" class="ghost-mini-button" type="button" ${state.selectedSkillKeys.size === 0 ? "disabled" : ""}>清空选择</button>
       </div>
-      <div class="skill-list-table ${skillGridView ? "is-grid" : ""}">${rows || `<div class="empty-config-panel">未检测到已安装 Skills。可以去市场用 npm / npx / pnpm / GitHub / JSON 安装。</div>`}</div>
+      <div class="skill-list-table ${state.skillGridView ? "is-grid" : ""}">${rows || `<div class="empty-config-panel">未检测到已安装 Skills。可以去市场用 npm / npx / pnpm / GitHub / JSON 安装。</div>`}</div>
       <div class="skills-footer"><span>共 ${skills.length} 条，当前显示 ${filteredSkills.length} 条</span>${renderPager("skill", skillPageNum, totalPages)}</div>
     </section></main>`;
 }
@@ -1705,10 +1582,10 @@ function renderSkillCard(skill: MarketSkill): string {
   const methodTags = skill.methods.map((method) => method.label).join(" / ");
   const targets = marketSkillTargets(skill);
   const supportNames = skill.supportedClients.map(clientNameById).join(" / ");
-  const installed = installedMarketSkillIds.has(skill.id);
+  const installed = state.installedMarketSkillIds.has(skill.id);
   const noTarget = targets.length === 0;
-  const installDisabled = !recommended || installingKey === key || noTarget;
-  const installLabel = installingKey === key ? "安装中" : noTarget ? "无支持客户端" : installed ? "重新安装" : "安装";
+  const installDisabled = !recommended || state.installingKey === key || noTarget;
+  const installLabel = state.installingKey === key ? "安装中" : noTarget ? "无支持客户端" : installed ? "重新安装" : "安装";
   return `
     <article class="catalog-card">
       <div class="catalog-card-main">${renderSkillIcon(skill.iconFile, skill.name)}<div><h3>${html(skill.name)}</h3><p>${html(skill.description)}</p></div></div>
@@ -1716,7 +1593,7 @@ function renderSkillCard(skill: MarketSkill): string {
       <div class="catalog-support">支持客户端：${html(supportNames)}</div>
       <div class="catalog-footer"><span class="stars">★ ${skill.rating}</span><span>♙ ${skill.installs} 安装</span><button class="install-method-button primary-install" data-skill-id="${html(skill.id)}" data-method-id="${recommended?.id ?? ""}" title="${html(recommended?.detail ?? "暂无安装方式")}" type="button" ${installDisabled ? "disabled" : ""}>${installLabel}</button></div>
       <small class="catalog-repo">${html(skill.repo)}</small>
-      ${installLogs[skill.id] ? `<pre class="install-log">${html(installLogs[skill.id])}</pre>` : ""}
+      ${state.installLogs[skill.id] ? `<pre class="install-log">${html(state.installLogs[skill.id])}</pre>` : ""}
     </article>`;
 }
 
@@ -1734,14 +1611,14 @@ function renderMcpCard(mcp: MarketMcp): string {
 }
 
 function renderMarketView(): string {
-  const isMcp = marketTab === "mcp";
+  const isMcp = state.marketTab === "mcp";
   const tabs = `<section class="market-tabs-line"><button class="market-page-tab ${isMcp ? "" : "is-active"}" data-market-tab="skill" type="button">Skill 市场</button><button class="market-page-tab ${isMcp ? "is-active" : ""}" data-market-tab="mcp" type="button">MCP 专栏</button></section>`;
   if (isMcp) {
-    const q = mcpQuery.trim().toLowerCase();
+    const q = state.mcpQuery.trim().toLowerCase();
     const mcps = marketMcps
       .filter((m) => !q || `${m.name} ${m.description} ${m.id}`.toLowerCase().includes(q))
       .sort((a, b) =>
-        mcpSort === "transport"
+        state.mcpSort === "transport"
           ? a.transport.localeCompare(b.transport) || a.name.localeCompare(b.name)
           : a.name.localeCompare(b.name)
       );
@@ -1749,40 +1626,40 @@ function renderMarketView(): string {
     <main class="market-workspace">
       <header class="market-page-header"><div><h1>市场</h1><p>内置常用 MCP 服务，一键写入所选客户端的配置文件。</p></div><button id="git-install-button" class="secondary-button" type="button">⬇ 从 Git 安装</button></header>
       ${tabs}
-      <section class="market-toolbar mcp-market-toolbar"><label class="market-search-box"><span>${svgIcon("search", 16)}</span><input id="mcp-search-input" value="${html(mcpQuery)}" placeholder="搜索 MCP..." /></label><select id="mcp-sort-select" class="skills-select"><option value="name" ${mcpSort === "name" ? "selected" : ""}>按名称排序</option><option value="transport" ${mcpSort === "transport" ? "selected" : ""}>按传输方式排序</option></select><button id="refresh-detection" class="refresh-button" type="button">${svgIcon("refresh", 16)}</button></section>
+      <section class="market-toolbar mcp-market-toolbar"><label class="market-search-box"><span>${svgIcon("search", 16)}</span><input id="mcp-search-input" value="${html(state.mcpQuery)}" placeholder="搜索 MCP..." /></label><select id="mcp-sort-select" class="skills-select"><option value="name" ${state.mcpSort === "name" ? "selected" : ""}>按名称排序</option><option value="transport" ${state.mcpSort === "transport" ? "selected" : ""}>按传输方式排序</option></select><button id="refresh-detection" class="refresh-button" type="button">${svgIcon("refresh", 16)}</button></section>
       <section class="install-route-panel"><strong>MCP 写入</strong><span>选择目标客户端后会把 MCP 配置写入其配置文件（claude / claude-desktop / gemini / cursor / trae 用 JSON，codex 用 TOML）。写入后请重新检测。</span></section>
       <section class="skill-catalog-grid">${mcps.map(renderMcpCard).join("") || `<div class="empty-config-panel">没有匹配的 MCP。</div>`}</section>
     </main>`;
   }
-  const sq = marketSkillQuery.trim().toLowerCase();
+  const sq = state.marketSkillQuery.trim().toLowerCase();
   const categories = ["全部", ...Array.from(new Set(marketSkills.map((item) => item.category)))];
   const skillList = marketSkills
-    .filter((item) => marketSkillCategory === "全部" || item.category === marketSkillCategory)
+    .filter((item) => state.marketSkillCategory === "全部" || item.category === state.marketSkillCategory)
     .filter((item) => !sq || `${item.name} ${item.description} ${item.id} ${item.repo}`.toLowerCase().includes(sq))
-    .sort((a, b) => (marketSkillSort === "rating" ? parseFloat(b.rating) - parseFloat(a.rating) : a.name.localeCompare(b.name)));
+    .sort((a, b) => (state.marketSkillSort === "rating" ? parseFloat(b.rating) - parseFloat(a.rating) : a.name.localeCompare(b.name)));
   return `
     <main class="market-workspace">
       <header class="market-page-header"><div><h1>市场</h1><p>支持 npm、npx、pnpm、GitHub 和静态 JSON 注册表安装 Skills。</p></div><button id="git-install-button" class="secondary-button" type="button">⬇ 从 Git 安装</button></header>
       ${tabs}
-      <section class="market-toolbar mcp-market-toolbar"><label class="market-search-box"><span>${svgIcon("search", 16)}</span><input id="market-skill-search" value="${html(marketSkillQuery)}" placeholder="搜索 Skills..." /></label><select id="market-skill-sort" class="skills-select"><option value="name" ${marketSkillSort === "name" ? "selected" : ""}>按名称排序</option><option value="rating" ${marketSkillSort === "rating" ? "selected" : ""}>按评分排序</option></select><button id="refresh-detection" class="refresh-button" type="button">${svgIcon("refresh", 16)}</button></section>
+      <section class="market-toolbar mcp-market-toolbar"><label class="market-search-box"><span>${svgIcon("search", 16)}</span><input id="market-skill-search" value="${html(state.marketSkillQuery)}" placeholder="搜索 Skills..." /></label><select id="market-skill-sort" class="skills-select"><option value="name" ${state.marketSkillSort === "name" ? "selected" : ""}>按名称排序</option><option value="rating" ${state.marketSkillSort === "rating" ? "selected" : ""}>按评分排序</option></select><button id="refresh-detection" class="refresh-button" type="button">${svgIcon("refresh", 16)}</button></section>
       <section class="install-route-panel"><strong>安装路线</strong><span>CLI 包走 npm/pnpm；一次性初始化走 npx；仓库型 Skill 走 GitHub clone；无后端市场走 JSON manifest/registry。</span></section>
-      <section class="category-row">${categories.map((category) => `<button class="category-pill ${marketSkillCategory === category ? "is-active" : ""}" data-category="${html(category)}" type="button">${html(category)}</button>`).join("")}</section>
+      <section class="category-row">${categories.map((category) => `<button class="category-pill ${state.marketSkillCategory === category ? "is-active" : ""}" data-category="${html(category)}" type="button">${html(category)}</button>`).join("")}</section>
       <section class="skill-catalog-grid">${skillList.map(renderSkillCard).join("") || `<div class="empty-config-panel">没有匹配的 Skill。</div>`}</section>
     </main>`;
 }
 
 function renderSettingsView(): string {
-  const hasUpdate = Boolean(updateInfo?.available && updateInfo.latestVersion);
-  const updateStatus = updateChecking
+  const hasUpdate = Boolean(state.updateInfo?.available && state.updateInfo.latestVersion);
+  const updateStatus = state.updateChecking
     ? "正在检查更新..."
-    : updateError
-      ? `检查失败：${updateError}`
-      : updateInfo
+    : state.updateError
+      ? `检查失败：${state.updateError}`
+      : state.updateInfo
         ? hasUpdate
-          ? `发现新版本 ${updateInfo.latestVersion}`
+          ? `发现新版本 ${state.updateInfo.latestVersion}`
           : "当前已是最新版本"
         : "尚未检查";
-  const notes = updateInfo?.notes ? updateInfo.notes.slice(0, 420) : "";
+  const notes = state.updateInfo?.notes ? state.updateInfo.notes.slice(0, 420) : "";
   return `
     <main class="workspace single-column-workspace">
       <section class="client-main-card management-card settings-page-card">
@@ -1792,27 +1669,27 @@ function renderSettingsView(): string {
         </div>
 
         <section class="settings-section">
-          <div class="settings-section-title"><div><h3>应用更新</h3><p>内置 GitHub Releases 更新检查，优先读取 Release 附带的 latest.json。</p></div><span class="settings-version-pill">当前 v${html(updateInfo?.currentVersion ?? "0.1.0")}</span></div>
+          <div class="settings-section-title"><div><h3>应用更新</h3><p>内置 GitHub Releases 更新检查，优先读取 Release 附带的 latest.json。</p></div><span class="settings-version-pill">当前 v${html(state.updateInfo?.currentVersion ?? "0.1.0")}</span></div>
           <div class="update-panel ${hasUpdate ? "has-update" : ""}">
             <div class="update-panel-main">
               <div class="update-icon">${hasUpdate ? "↑" : "✓"}</div>
               <div>
                 <strong>${html(updateStatus)}</strong>
-                <p>${updateInfo ? `更新源：${html(updateInfo.sourceUrl)}` : "默认更新源：GitHub Releases latest.json / releases/latest"}</p>
+                <p>${state.updateInfo ? `更新源：${html(state.updateInfo.sourceUrl)}` : "默认更新源：GitHub Releases latest.json / releases/latest"}</p>
                 <dl>
-                  <div><dt>最新版本</dt><dd>${html(updateInfo?.latestVersion ?? "—")}</dd></div>
-                  <div><dt>发布时间</dt><dd>${html(updateTimestamp(updateInfo?.pubDate))}</dd></div>
-                  <div><dt>检查时间</dt><dd>${html(updateTimestamp(updateInfo?.checkedAt))}</dd></div>
+                  <div><dt>最新版本</dt><dd>${html(state.updateInfo?.latestVersion ?? "—")}</dd></div>
+                  <div><dt>发布时间</dt><dd>${html(updateTimestamp(state.updateInfo?.pubDate))}</dd></div>
+                  <div><dt>检查时间</dt><dd>${html(updateTimestamp(state.updateInfo?.checkedAt))}</dd></div>
                 </dl>
               </div>
             </div>
             <div class="update-panel-actions">
-              <button id="check-app-update" class="primary-button" type="button" ${updateChecking ? "disabled" : ""}>${updateChecking ? "检查中..." : "检查更新"}</button>
-              <button id="open-release-page" class="secondary-button" type="button" ${updateInfo?.releaseUrl ? "" : "disabled"}>打开发布页</button>
+              <button id="check-app-update" class="primary-button" type="button" ${state.updateChecking ? "disabled" : ""}>${state.updateChecking ? "检查中..." : "检查更新"}</button>
+              <button id="open-release-page" class="secondary-button" type="button" ${state.updateInfo?.releaseUrl ? "" : "disabled"}>打开发布页</button>
               <button id="dismiss-update-version" class="secondary-button" type="button" ${hasUpdate ? "" : "disabled"}>忽略本版本</button>
             </div>
           </div>
-          ${notes ? `<pre class="update-notes">${html(notes)}${updateInfo?.notes && updateInfo.notes.length > notes.length ? "\n..." : ""}</pre>` : ""}
+          ${notes ? `<pre class="update-notes">${html(notes)}${state.updateInfo?.notes && state.updateInfo.notes.length > notes.length ? "\n..." : ""}</pre>` : ""}
         </section>
 
         <section class="settings-section">
@@ -1820,9 +1697,9 @@ function renderSettingsView(): string {
           <div class="settings-row theme-settings-row">
             <span>主题模式</span>
             <div class="theme-segmented" role="group" aria-label="主题模式">
-              <button class="theme-seg ${themeMode === "light" ? "is-active" : ""}" data-theme-mode="light" type="button">日间</button>
-              <button class="theme-seg ${themeMode === "dark" ? "is-active" : ""}" data-theme-mode="dark" type="button">夜间</button>
-              <button class="theme-seg ${themeMode === "system" ? "is-active" : ""}" data-theme-mode="system" type="button">跟随系统</button>
+              <button class="theme-seg ${state.themeMode === "light" ? "is-active" : ""}" data-theme-mode="light" type="button">日间</button>
+              <button class="theme-seg ${state.themeMode === "dark" ? "is-active" : ""}" data-theme-mode="dark" type="button">夜间</button>
+              <button class="theme-seg ${state.themeMode === "system" ? "is-active" : ""}" data-theme-mode="system" type="button">跟随系统</button>
             </div>
           </div>
         </section>
@@ -1830,14 +1707,14 @@ function renderSettingsView(): string {
         <section class="settings-section">
           <div class="settings-section-title"><div><h3>扩展扫描目录 / WSL</h3><p>把 WSL 或任意自定义 home 目录加入检测，读取其中的 Skills / MCP / Rules（只读，可复制到 Windows 客户端）。</p></div></div>
           <div class="scan-roots-actions">
-            <button id="detect-wsl" class="secondary-button" type="button" ${wslDetecting ? "disabled" : ""}>${wslDetecting ? "检测中..." : "检测 WSL 发行版"}</button>
+            <button id="detect-wsl" class="secondary-button" type="button" ${state.wslDetecting ? "disabled" : ""}>${state.wslDetecting ? "检测中..." : "检测 WSL 发行版"}</button>
           </div>
-          ${wslDetectError ? `<div class="status-banner danger">${html(wslDetectError)}</div>` : ""}
+          ${state.wslDetectError ? `<div class="status-banner danger">${html(state.wslDetectError)}</div>` : ""}
           ${
-            wslDistros.length > 0
-              ? `<div class="wsl-distro-list">${wslDistros
+            state.wslDistros.length > 0
+              ? `<div class="wsl-distro-list">${state.wslDistros
                   .map((d) => {
-                    const added = scanRoots.some((r) => r.path.toLowerCase() === d.homeUnc.toLowerCase());
+                    const added = state.scanRoots.some((r) => r.path.toLowerCase() === d.homeUnc.toLowerCase());
                     return `<div class="wsl-distro-row"><div><strong>${html(d.distro)}</strong><code>${html(d.homeUnc)}</code></div><button class="ghost-mini-button" data-add-wsl="${html(d.distro)}" type="button" ${added ? "disabled" : ""}>${added ? "已添加" : "添加"}</button></div>`;
                   })
                   .join("")}</div>`
@@ -1849,8 +1726,8 @@ function renderSettingsView(): string {
             <button id="add-scan-root" class="secondary-button" type="button">添加目录</button>
           </div>
           ${
-            scanRoots.length > 0
-              ? `<div class="scan-roots-list">${scanRoots
+            state.scanRoots.length > 0
+              ? `<div class="scan-roots-list">${state.scanRoots
                   .map(
                     (r) =>
                       `<div class="scan-root-row"><span class="client-source-badge ${r.kind === "wsl" ? "wsl" : "custom"}">${r.kind === "wsl" ? "WSL" : "扩展"}</span><div><strong>${html(r.label)}</strong><code>${html(r.path)}</code></div><button class="ghost-mini-button" data-remove-root="${html(r.tag)}" type="button">移除</button></div>`
@@ -1868,20 +1745,20 @@ function renderPlaceholder(title: string): string {
 }
 
 function renderContent(): string {
-  if (currentView === "clients") return renderClientView();
-  if (currentView === "wsl") return renderWslView();
-  if (currentView === "mcp") return renderMcpView();
-  if (currentView === "skills") return renderSkillsView();
-  if (currentView === "rules") return renderRulesView();
-  if (currentView === "market") return renderMarketView();
-  if (currentView === "settings") return renderSettingsView();
-  return renderPlaceholder(navItems.find(([, , view]) => view === currentView)?.[0] ?? "模块");
+  if (state.currentView === "clients") return renderClientView();
+  if (state.currentView === "wsl") return renderWslView();
+  if (state.currentView === "mcp") return renderMcpView();
+  if (state.currentView === "skills") return renderSkillsView();
+  if (state.currentView === "rules") return renderRulesView();
+  if (state.currentView === "market") return renderMarketView();
+  if (state.currentView === "settings") return renderSettingsView();
+  return renderPlaceholder(navItems.find(([, , view]) => view === state.currentView)?.[0] ?? "模块");
 }
 
 function renderSkillContextMenu(): string {
-  const ctx = skillContextMenu;
+  const ctx = state.skillContextMenu;
   if (!ctx) return "";
-  const skill = environment?.skills.find((item) => skillKey(item) === ctx.key) ?? skillByPath(ctx.path);
+  const skill = state.environment?.skills.find((item) => skillKey(item) === ctx.key) ?? skillByPath(ctx.path);
   if (!skill) return "";
   const paths = transferPathsForContext(ctx.key, skill.path);
   const multi = paths.length > 1;
@@ -1895,8 +1772,8 @@ function renderSkillContextMenu(): string {
           (target) => `
             <div class="context-target-row">
               <span><strong>${html(target.name)}</strong><small>${html(target.type)}</small></span>
-              <button class="skill-context-action" data-action="copy" data-target-client-id="${html(target.id)}" type="button" ${skillTransferBusy ? "disabled" : ""}>复制</button>
-              <button class="skill-context-action move" data-action="move" data-target-client-id="${html(target.id)}" type="button" ${skillTransferBusy ? "disabled" : ""}>移动</button>
+              <button class="skill-context-action" data-action="copy" data-target-client-id="${html(target.id)}" type="button" ${state.skillTransferBusy ? "disabled" : ""}>复制</button>
+              <button class="skill-context-action move" data-action="move" data-target-client-id="${html(target.id)}" type="button" ${state.skillTransferBusy ? "disabled" : ""}>移动</button>
             </div>`
         )
         .join("")
@@ -1915,7 +1792,7 @@ function openDeleteSkillsDialog(paths: string[], label?: string): void {
   const uniquePaths = [...new Set(paths)].filter(Boolean);
   if (uniquePaths.length === 0) return;
   const isBatch = uniquePaths.length > 1;
-  confirmDialog = {
+  state.confirmDialog = {
     title: isBatch ? "批量删除 Skills" : "删除 Skill",
     message: isBatch
       ? `确认删除选中的 ${uniquePaths.length} 个 Skills？会先移动到 SMRmanager 回收目录，便于恢复。`
@@ -1924,27 +1801,27 @@ function openDeleteSkillsDialog(paths: string[], label?: string): void {
     cancelLabel: "取消",
     paths: uniquePaths
   };
-  skillContextMenu = null;
+  state.skillContextMenu = null;
   renderApp(true);
 }
 
 function renderConfirmDialog(): string {
-  if (!confirmDialog) return "";
+  if (!state.confirmDialog) return "";
   return `
     <div class="alert-dialog-backdrop" role="presentation">
       <section class="alert-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-dialog-title" aria-describedby="delete-dialog-desc">
         <div class="alert-dialog-icon">⌫</div>
         <div class="alert-dialog-copy">
-          <h2 id="delete-dialog-title">${html(confirmDialog.title)}</h2>
-          <p id="delete-dialog-desc">${html(confirmDialog.message)}</p>
+          <h2 id="delete-dialog-title">${html(state.confirmDialog.title)}</h2>
+          <p id="delete-dialog-desc">${html(state.confirmDialog.message)}</p>
           <div class="alert-dialog-paths">
-            ${confirmDialog.paths.slice(0, 4).map((path) => `<code>${html(path)}</code>`).join("")}
-            ${confirmDialog.paths.length > 4 ? `<span>还有 ${confirmDialog.paths.length - 4} 项...</span>` : ""}
+            ${state.confirmDialog.paths.slice(0, 4).map((path) => `<code>${html(path)}</code>`).join("")}
+            ${state.confirmDialog.paths.length > 4 ? `<span>还有 ${state.confirmDialog.paths.length - 4} 项...</span>` : ""}
           </div>
         </div>
         <div class="alert-dialog-actions">
-          <button id="confirm-dialog-cancel" class="secondary-button" type="button">${html(confirmDialog.cancelLabel)}</button>
-          <button id="confirm-dialog-confirm" class="danger-dialog-button" type="button">${html(confirmDialog.confirmLabel)}</button>
+          <button id="confirm-dialog-cancel" class="secondary-button" type="button">${html(state.confirmDialog.cancelLabel)}</button>
+          <button id="confirm-dialog-confirm" class="danger-dialog-button" type="button">${html(state.confirmDialog.confirmLabel)}</button>
         </div>
       </section>
     </div>`;
@@ -1992,8 +1869,8 @@ function renderGitInspected(insp: GitInspectResult, skillTargets: RuntimeClient[
 }
 
 function renderGitInstallDialog(): string {
-  if (!gitInstallDialog) return "";
-  const d = gitInstallDialog;
+  if (!state.gitInstallDialog) return "";
+  const d = state.gitInstallDialog;
   return `
     <div class="alert-dialog-backdrop" role="presentation">
       <section class="alert-dialog git-install-dialog" role="dialog" aria-modal="true" aria-labelledby="git-dialog-title">
@@ -2017,8 +1894,8 @@ function renderGitInstallDialog(): string {
 }
 
 function renderSkillLinkDialog(): string {
-  if (!skillLinkDialog) return "";
-  const dialog = skillLinkDialog;
+  if (!state.skillLinkDialog) return "";
+  const dialog = state.skillLinkDialog;
   const skill = skillByPath(dialog.skillPath);
   const linkedSet = new Set(skill?.linkedClients ?? []);
   const targets = skillTargetClients();
@@ -2048,20 +1925,20 @@ function renderSkillLinkDialog(): string {
         </div>
         <div class="alert-dialog-actions">
           <button id="link-dialog-cancel" class="secondary-button" type="button">关闭</button>
-          <button id="link-dialog-confirm" class="primary-button" type="button" ${skillTransferBusy ? "disabled" : ""}>链接选中</button>
+          <button id="link-dialog-confirm" class="primary-button" type="button" ${state.skillTransferBusy ? "disabled" : ""}>链接选中</button>
         </div>
       </section>
     </div>`;
 }
 
 function renderSkillGroupDialog(): string {
-  if (!skillGroupDialog) return "";
-  const dialog = skillGroupDialog;
+  if (!state.skillGroupDialog) return "";
+  const dialog = state.skillGroupDialog;
   const title = dialog.mode === "create" ? "新建分组" : "重命名分组";
   const hint =
     dialog.mode === "create"
       ? dialog.addSelected
-        ? `将新建分组，并把当前选中的 ${selectedSkillKeys.size} 个 Skill 加入。`
+        ? `将新建分组，并把当前选中的 ${state.selectedSkillKeys.size} 个 Skill 加入。`
         : "新建一个空分组，之后可把 Skill 加入。"
       : "修改分组名称（不影响 Skill 文件）。";
   return `
@@ -2084,8 +1961,8 @@ function renderSkillGroupDialog(): string {
 }
 
 function renderImportDialog(): string {
-  if (!importSkillDialog) return "";
-  const dialog = importSkillDialog;
+  if (!state.importSkillDialog) return "";
+  const dialog = state.importSkillDialog;
   const targets = skillTargetClients();
   const sourceName = dialog.sourceDir.split(/[\\/]/).filter(Boolean).pop() ?? dialog.sourceDir;
   return `
@@ -2104,15 +1981,15 @@ function renderImportDialog(): string {
         </div>
         <div class="alert-dialog-actions">
           <button id="import-dialog-cancel" class="secondary-button" type="button">取消</button>
-          <button id="import-dialog-confirm" class="primary-button" type="button" ${targets.length === 0 || skillTransferBusy ? "disabled" : ""}>确认导入</button>
+          <button id="import-dialog-confirm" class="primary-button" type="button" ${targets.length === 0 || state.skillTransferBusy ? "disabled" : ""}>确认导入</button>
         </div>
       </section>
     </div>`;
 }
 
 function renderMarketInstallDialog(): string {
-  if (!marketInstallDialog) return "";
-  const dialog = marketInstallDialog;
+  if (!state.marketInstallDialog) return "";
+  const dialog = state.marketInstallDialog;
   const skill = marketSkills.find((item) => item.id === dialog.skillId);
   const method = skill?.methods.find((item) => item.id === dialog.methodId);
   if (!skill || !method) return "";
@@ -2140,8 +2017,8 @@ function renderMarketInstallDialog(): string {
 }
 
 function renderMcpInstallDialog(): string {
-  if (!mcpInstallDialog) return "";
-  const dialog = mcpInstallDialog;
+  if (!state.mcpInstallDialog) return "";
+  const dialog = state.mcpInstallDialog;
   const mcp = marketMcps.find((item) => item.id === dialog.mcpId);
   if (!mcp) return "";
   const targets = mcpTargetClients();
@@ -2173,24 +2050,24 @@ function renderWindowControls(): string {
 }
 
 function applyThemeToDocument(): void {
-  document.documentElement.dataset.theme = currentTheme;
-  document.documentElement.style.colorScheme = currentTheme;
-  document.body.setAttribute("data-dark-mode", currentTheme === "dark" ? "true" : "false");
+  document.documentElement.dataset.theme = state.currentTheme;
+  document.documentElement.style.colorScheme = state.currentTheme;
+  document.body.setAttribute("data-dark-mode", state.currentTheme === "dark" ? "true" : "false");
 }
 
 function syncThemeControls(): void {
   document.querySelectorAll<HTMLElement>("[data-theme-toggle]").forEach((toggle) => {
-    toggle.setAttribute("value", currentTheme);
+    toggle.setAttribute("value", state.currentTheme);
   });
   document.querySelectorAll<HTMLElement>(".theme-seg").forEach((btn) => {
-    btn.classList.toggle("is-active", btn.dataset.themeMode === themeMode);
+    btn.classList.toggle("is-active", btn.dataset.themeMode === state.themeMode);
   });
 }
 
 function setThemeMode(mode: ThemeMode): void {
-  themeMode = mode;
+  state.themeMode = mode;
   localStorage.setItem(themeStorageKey, mode);
-  currentTheme = resolveTheme(mode);
+  state.currentTheme = resolveTheme(mode);
   // 主题控件本身有完整 CSS 动画；这里不重绘整棵 DOM，避免组件被重建导致动画中断。
   applyThemeToDocument();
   syncThemeControls();
@@ -2201,7 +2078,7 @@ function bindSkillContextMenuEvents(): void {
   document.querySelectorAll<HTMLButtonElement>(".skill-context-action").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      const context = skillContextMenu;
+      const context = state.skillContextMenu;
       if (!context) return;
       const action = button.dataset.action === "move" ? "move" : "copy";
       const targetClientId = button.dataset.targetClientId ?? "";
@@ -2224,7 +2101,7 @@ function bindSkillContextMenuEvents(): void {
 function refreshSkillContextMenu(): void {
   document.querySelector(".skill-context-menu")?.remove();
   document.querySelectorAll(".is-context-target").forEach((el) => el.classList.remove("is-context-target"));
-  const ctx = skillContextMenu;
+  const ctx = state.skillContextMenu;
   if (!ctx) return;
   const shell = document.querySelector(".app-shell");
   if (!shell) return;
@@ -2235,14 +2112,14 @@ function refreshSkillContextMenu(): void {
   bindSkillContextMenuEvents();
 }
 
-function openSkillContextMenu(state: SkillContextMenuState): void {
-  skillContextMenu = state;
+function openSkillContextMenu(menu: SkillContextMenuState): void {
+  state.skillContextMenu = menu;
   refreshSkillContextMenu();
 }
 
 function closeSkillContextMenu(): void {
-  if (!skillContextMenu) return;
-  skillContextMenu = null;
+  if (!state.skillContextMenu) return;
+  state.skillContextMenu = null;
   refreshSkillContextMenu();
 }
 
@@ -2250,7 +2127,7 @@ function renderApp(preserveScroll = false): void {
   const workspaceScrollTop = preserveScroll ? (document.querySelector<HTMLElement>(".workspace")?.scrollTop ?? 0) : 0;
   const clientTabScrollTop = preserveScroll ? (document.querySelector<HTMLElement>(".client-tab-scroll")?.scrollTop ?? 0) : 0;
   applyThemeToDocument();
-  appRoot.innerHTML = `<div class="app-shell ${currentView === "market" ? "market-preview-shell" : ""}">${renderWindowControls()}${renderSidebar()}${renderContent()}${renderConfirmDialog()}${renderImportDialog()}${renderMarketInstallDialog()}${renderMcpInstallDialog()}${renderSkillGroupDialog()}${renderSkillLinkDialog()}${renderGitInstallDialog()}</div>`;
+  appRoot.innerHTML = `<div class="app-shell ${state.currentView === "market" ? "market-preview-shell" : ""}">${renderWindowControls()}${renderSidebar()}${renderContent()}${renderConfirmDialog()}${renderImportDialog()}${renderMarketInstallDialog()}${renderMcpInstallDialog()}${renderSkillGroupDialog()}${renderSkillLinkDialog()}${renderGitInstallDialog()}</div>`;
   bindInteractions();
   refreshSkillContextMenu();
   if (preserveScroll) {
@@ -2264,19 +2141,19 @@ function renderApp(preserveScroll = false): void {
 function bindInteractions(): void {
   document.querySelectorAll<HTMLButtonElement>(".client-row").forEach((button) => {
     button.addEventListener("click", () => {
-      skillContextMenu = null;
-      clientMenuOpen = false;
-      activeClientIndex = Number(button.dataset.clientIndex ?? 0);
-      activeClientTab = "skills";
-      currentView = "clients";
+      state.skillContextMenu = null;
+      state.clientMenuOpen = false;
+      state.activeClientIndex = Number(button.dataset.clientIndex ?? 0);
+      state.activeClientTab = "skills";
+      state.currentView = "clients";
       renderApp();
     });
   });
   document.querySelectorAll<HTMLButtonElement>(".nav-item").forEach((button) => {
     button.addEventListener("click", () => {
-      skillContextMenu = null;
-      clientMenuOpen = false;
-      currentView = (button.dataset.view as ViewName | undefined) ?? "clients";
+      state.skillContextMenu = null;
+      state.clientMenuOpen = false;
+      state.currentView = (button.dataset.view as ViewName | undefined) ?? "clients";
       renderApp();
     });
   });
@@ -2294,12 +2171,12 @@ function bindInteractions(): void {
     });
   });
   document.querySelector<HTMLButtonElement>("#confirm-dialog-cancel")?.addEventListener("click", () => {
-    confirmDialog = null;
+    state.confirmDialog = null;
     renderApp(true);
   });
   document.querySelector<HTMLButtonElement>("#confirm-dialog-confirm")?.addEventListener("click", () => {
-    const dialog = confirmDialog;
-    confirmDialog = null;
+    const dialog = state.confirmDialog;
+    state.confirmDialog = null;
     renderApp(true);
     if (!dialog) return;
     if (dialog.kind === "client" && dialog.clientId) {
@@ -2312,7 +2189,7 @@ function bindInteractions(): void {
   });
   document.querySelector<HTMLButtonElement>("#client-actions-toggle")?.addEventListener("click", (event) => {
     event.stopPropagation();
-    clientMenuOpen = !clientMenuOpen;
+    state.clientMenuOpen = !state.clientMenuOpen;
     renderApp();
   });
   // —— WSL 页事件 ——
@@ -2322,13 +2199,13 @@ function bindInteractions(): void {
   document.querySelector<HTMLButtonElement>("#refresh-wsl")?.addEventListener("click", () => void loadWslInstances());
   document.querySelectorAll<HTMLButtonElement>("[data-wsl-tab]").forEach((button) => {
     button.addEventListener("click", () => {
-      activeWslTab = (button.dataset.wslTab as typeof activeWslTab) ?? "skills";
+      state.activeWslTab = (button.dataset.wslTab as typeof state.activeWslTab) ?? "skills";
       renderApp(true);
     });
   });
   document.querySelectorAll<HTMLElement>("[data-wsl-skill-path]").forEach((row) => {
     row.addEventListener("click", () => {
-      selectedWslSkillPath = row.dataset.wslSkillPath ?? "";
+      state.selectedWslSkillPath = row.dataset.wslSkillPath ?? "";
       renderApp(true);
     });
   });
@@ -2341,24 +2218,24 @@ function bindInteractions(): void {
   });
   document.querySelector<HTMLButtonElement>("#wsl-actions-toggle")?.addEventListener("click", (event) => {
     event.stopPropagation();
-    clientMenuOpen = !clientMenuOpen;
+    state.clientMenuOpen = !state.clientMenuOpen;
     renderApp(true);
   });
   document.querySelectorAll<HTMLButtonElement>("[data-wsl-default]").forEach((button) => {
     button.addEventListener("click", () => {
-      clientMenuOpen = false;
+      state.clientMenuOpen = false;
       void wslControl("wsl_set_default", button.dataset.wslDefault ?? "", "已设为默认发行版");
     });
   });
   document.querySelectorAll<HTMLButtonElement>("[data-wsl-start]").forEach((button) => {
     button.addEventListener("click", () => {
-      clientMenuOpen = false;
+      state.clientMenuOpen = false;
       void wslControl("wsl_start", button.dataset.wslStart ?? "", "已启动发行版");
     });
   });
   document.querySelectorAll<HTMLButtonElement>("[data-wsl-stop]").forEach((button) => {
     button.addEventListener("click", () => {
-      clientMenuOpen = false;
+      state.clientMenuOpen = false;
       void wslControl("wsl_terminate", button.dataset.wslStop ?? "", "已停止发行版");
     });
   });
@@ -2368,16 +2245,16 @@ function bindInteractions(): void {
   });
   const gitUrlInput = document.querySelector<HTMLInputElement>("#git-url-input");
   gitUrlInput?.addEventListener("input", () => {
-    if (gitInstallDialog) gitInstallDialog.url = gitUrlInput.value;
+    if (state.gitInstallDialog) state.gitInstallDialog.url = gitUrlInput.value;
   });
   const gitSubdirInput = document.querySelector<HTMLInputElement>("#git-subdir-input");
   gitSubdirInput?.addEventListener("input", () => {
-    if (gitInstallDialog) gitInstallDialog.subdir = gitSubdirInput.value;
+    if (state.gitInstallDialog) state.gitInstallDialog.subdir = gitSubdirInput.value;
   });
   document.querySelector<HTMLButtonElement>("#git-inspect-btn")?.addEventListener("click", () => void gitInspect());
   document.querySelector<HTMLButtonElement>("#git-apply-btn")?.addEventListener("click", () => void gitApply());
   document.querySelector<HTMLButtonElement>("#git-dialog-cancel")?.addEventListener("click", () => {
-    gitInstallDialog = null;
+    state.gitInstallDialog = null;
     renderApp(true);
   });
   document.querySelectorAll<HTMLButtonElement>(".client-menu-item[data-client-action]").forEach((button) => {
@@ -2390,8 +2267,8 @@ function bindInteractions(): void {
       } else if (action === "import") {
         void importClientConfig(clientId);
       } else if (action === "delete") {
-        clientMenuOpen = false;
-        confirmDialog = {
+        state.clientMenuOpen = false;
+        state.confirmDialog = {
           title: "删除客户端配置",
           message: `确认删除 ${clientNameById(clientId)} 检测到的配置文件？会移动到 SMRmanager 回收目录，可恢复。`,
           confirmLabel: "删除",
@@ -2407,74 +2284,74 @@ function bindInteractions(): void {
   document.querySelector<HTMLButtonElement>("#import-skill-button")?.addEventListener("click", () => void startSkillImport());
   const importTargetSelect = document.querySelector<HTMLSelectElement>("#import-target-select");
   importTargetSelect?.addEventListener("change", () => {
-    if (importSkillDialog) importSkillDialog.targetClientId = importTargetSelect.value;
+    if (state.importSkillDialog) state.importSkillDialog.targetClientId = importTargetSelect.value;
   });
   document.querySelector<HTMLButtonElement>("#import-dialog-cancel")?.addEventListener("click", () => {
-    importSkillDialog = null;
+    state.importSkillDialog = null;
     renderApp(true);
   });
   document.querySelector<HTMLButtonElement>("#import-dialog-confirm")?.addEventListener("click", () => {
-    const dialog = importSkillDialog;
+    const dialog = state.importSkillDialog;
     if (!dialog) return;
     const target = document.querySelector<HTMLSelectElement>("#import-target-select")?.value || dialog.targetClientId;
     void importSkill(dialog.sourceDir, target);
   });
   const marketInstallSelect = document.querySelector<HTMLSelectElement>("#market-install-target");
   marketInstallSelect?.addEventListener("change", () => {
-    if (marketInstallDialog) marketInstallDialog.targetClientId = marketInstallSelect.value;
+    if (state.marketInstallDialog) state.marketInstallDialog.targetClientId = marketInstallSelect.value;
   });
   document.querySelector<HTMLButtonElement>("#market-install-cancel")?.addEventListener("click", () => {
-    marketInstallDialog = null;
+    state.marketInstallDialog = null;
     renderApp();
   });
   document.querySelector<HTMLButtonElement>("#market-install-confirm")?.addEventListener("click", () => {
-    const dialog = marketInstallDialog;
+    const dialog = state.marketInstallDialog;
     if (!dialog) return;
     const skill = marketSkills.find((item) => item.id === dialog.skillId);
     const method = skill?.methods.find((item) => item.id === dialog.methodId);
     if (!skill || !method) return;
     const target = document.querySelector<HTMLSelectElement>("#market-install-target")?.value || dialog.targetClientId;
-    marketInstallDialog = null;
+    state.marketInstallDialog = null;
     void installMarketSkill(skill, method, target);
   });
   const mcpInstallSelect = document.querySelector<HTMLSelectElement>("#mcp-install-target");
   mcpInstallSelect?.addEventListener("change", () => {
-    if (mcpInstallDialog) mcpInstallDialog.targetClientId = mcpInstallSelect.value;
+    if (state.mcpInstallDialog) state.mcpInstallDialog.targetClientId = mcpInstallSelect.value;
   });
   document.querySelector<HTMLButtonElement>("#mcp-install-cancel")?.addEventListener("click", () => {
-    mcpInstallDialog = null;
+    state.mcpInstallDialog = null;
     renderApp();
   });
   document.querySelector<HTMLButtonElement>("#mcp-install-confirm")?.addEventListener("click", () => {
-    const dialog = mcpInstallDialog;
+    const dialog = state.mcpInstallDialog;
     if (!dialog) return;
     const mcp = marketMcps.find((item) => item.id === dialog.mcpId);
     if (!mcp) return;
     const target = document.querySelector<HTMLSelectElement>("#mcp-install-target")?.value || dialog.targetClientId;
-    mcpInstallDialog = null;
+    state.mcpInstallDialog = null;
     void installMcpServer(mcp, target);
   });
   document.querySelector<HTMLElement>(".alert-dialog-backdrop")?.addEventListener("click", (event) => {
     if ((event.target as Element | null)?.closest(".alert-dialog")) return;
-    confirmDialog = null;
-    importSkillDialog = null;
-    marketInstallDialog = null;
-    mcpInstallDialog = null;
+    state.confirmDialog = null;
+    state.importSkillDialog = null;
+    state.marketInstallDialog = null;
+    state.mcpInstallDialog = null;
     renderApp(true);
   });
   document.querySelector<HTMLButtonElement>("#check-app-update")?.addEventListener("click", () => void checkUpdates(true));
   document.querySelector<HTMLButtonElement>("#open-release-page")?.addEventListener("click", () => {
-    const url = updateInfo?.releaseUrl || updateInfo?.downloadUrl;
+    const url = state.updateInfo?.releaseUrl || state.updateInfo?.downloadUrl;
     if (url) window.open(url, "_blank", "noopener,noreferrer");
   });
   document.querySelector<HTMLButtonElement>("#dismiss-update-version")?.addEventListener("click", () => {
-    if (updateInfo?.latestVersion) localStorage.setItem(dismissedUpdateStorageKey, updateInfo.latestVersion);
+    if (state.updateInfo?.latestVersion) localStorage.setItem(dismissedUpdateStorageKey, state.updateInfo.latestVersion);
     renderApp();
   });
   document.querySelector<HTMLButtonElement>("#detect-wsl")?.addEventListener("click", () => void detectWslDistros());
   document.querySelectorAll<HTMLButtonElement>("[data-add-wsl]").forEach((button) => {
     button.addEventListener("click", () => {
-      const distro = wslDistros.find((d) => d.distro === button.dataset.addWsl);
+      const distro = state.wslDistros.find((d) => d.distro === button.dataset.addWsl);
       if (distro) addWslDistroAsRoot(distro);
     });
   });
@@ -2496,12 +2373,12 @@ function bindInteractions(): void {
     });
   });
   document.querySelector<HTMLButtonElement>("#sidebar-update-open")?.addEventListener("click", () => {
-    currentView = "settings";
+    state.currentView = "settings";
     renderApp();
   });
   document.querySelector<HTMLButtonElement>("#sidebar-update-dismiss")?.addEventListener("click", (event) => {
     event.stopPropagation();
-    if (updateInfo?.latestVersion) localStorage.setItem(dismissedUpdateStorageKey, updateInfo.latestVersion);
+    if (state.updateInfo?.latestVersion) localStorage.setItem(dismissedUpdateStorageKey, state.updateInfo.latestVersion);
     renderApp();
   });
   document.querySelectorAll<HTMLButtonElement>("#refresh-detection").forEach((button) => button.addEventListener("click", () => void loadEnvironment(true)));
@@ -2516,7 +2393,7 @@ function bindInteractions(): void {
         button.textContent = "已启动";
       } catch (error) {
         button.textContent = "启动失败";
-        installLogs[clientId] = error instanceof Error ? error.message : String(error);
+        state.installLogs[clientId] = error instanceof Error ? error.message : String(error);
       } finally {
         setTimeout(renderApp, 900);
       }
@@ -2539,20 +2416,20 @@ function bindInteractions(): void {
         setSkillActionMessage(`${skill.name} 不支持任何已安装客户端`, 4000);
         return;
       }
-      marketInstallDialog = { skillId: skill.id, methodId: method.id, targetClientId: preferredSkillTargetId(targets) };
+      state.marketInstallDialog = { skillId: skill.id, methodId: method.id, targetClientId: preferredSkillTargetId(targets) };
       renderApp();
     });
   });
   document.querySelectorAll<HTMLButtonElement>(".market-page-tab[data-market-tab]").forEach((button) => {
     button.addEventListener("click", () => {
-      marketTab = button.dataset.marketTab === "mcp" ? "mcp" : "skill";
+      state.marketTab = button.dataset.marketTab === "mcp" ? "mcp" : "skill";
       renderApp();
     });
   });
   const mcpSearchInput = document.querySelector<HTMLInputElement>("#mcp-search-input");
   mcpSearchInput?.addEventListener("input", () => {
     const cursor = mcpSearchInput.selectionStart ?? mcpSearchInput.value.length;
-    mcpQuery = mcpSearchInput.value;
+    state.mcpQuery = mcpSearchInput.value;
     renderApp();
     requestAnimationFrame(() => {
       const next = document.querySelector<HTMLInputElement>("#mcp-search-input");
@@ -2562,13 +2439,13 @@ function bindInteractions(): void {
   });
   const mcpSortSelect = document.querySelector<HTMLSelectElement>("#mcp-sort-select");
   mcpSortSelect?.addEventListener("change", () => {
-    mcpSort = mcpSortSelect.value === "transport" ? "transport" : "name";
+    state.mcpSort = mcpSortSelect.value === "transport" ? "transport" : "name";
     renderApp();
   });
   const marketSkillSearch = document.querySelector<HTMLInputElement>("#market-skill-search");
   marketSkillSearch?.addEventListener("input", () => {
     const cursor = marketSkillSearch.selectionStart ?? marketSkillSearch.value.length;
-    marketSkillQuery = marketSkillSearch.value;
+    state.marketSkillQuery = marketSkillSearch.value;
     renderApp();
     requestAnimationFrame(() => {
       const next = document.querySelector<HTMLInputElement>("#market-skill-search");
@@ -2578,12 +2455,12 @@ function bindInteractions(): void {
   });
   const marketSkillSortSelect = document.querySelector<HTMLSelectElement>("#market-skill-sort");
   marketSkillSortSelect?.addEventListener("change", () => {
-    marketSkillSort = marketSkillSortSelect.value === "rating" ? "rating" : "name";
+    state.marketSkillSort = marketSkillSortSelect.value === "rating" ? "rating" : "name";
     renderApp();
   });
   document.querySelectorAll<HTMLButtonElement>(".category-pill[data-category]").forEach((button) => {
     button.addEventListener("click", () => {
-      marketSkillCategory = button.dataset.category ?? "全部";
+      state.marketSkillCategory = button.dataset.category ?? "全部";
       renderApp();
     });
   });
@@ -2596,7 +2473,7 @@ function bindInteractions(): void {
         setSkillActionMessage("没有可写入 MCP 配置的已安装客户端", 4000);
         return;
       }
-      mcpInstallDialog = { mcpId: mcp.id, targetClientId: targets[0].id };
+      state.mcpInstallDialog = { mcpId: mcp.id, targetClientId: targets[0].id };
       renderApp();
     });
   });
@@ -2626,7 +2503,7 @@ function bindInteractions(): void {
   skillSearchInput?.addEventListener("input", () => {
     const input = skillSearchInput;
     const cursor = input.selectionStart ?? input.value.length;
-    skillQuery = input.value;
+    state.skillQuery = input.value;
     renderApp();
     requestAnimationFrame(() => {
       const next = document.querySelector<HTMLInputElement>("#skill-search-input");
@@ -2636,28 +2513,28 @@ function bindInteractions(): void {
   });
   const skillClientSelect = document.querySelector<HTMLSelectElement>("#skill-client-filter");
   skillClientSelect?.addEventListener("change", () => {
-    skillClientFilter = skillClientSelect.value;
-    selectedSkillKeys.clear();
+    state.skillClientFilter = skillClientSelect.value;
+    state.selectedSkillKeys.clear();
     renderApp();
   });
   const skillStatusSelect = document.querySelector<HTMLSelectElement>("#skill-status-filter");
   skillStatusSelect?.addEventListener("change", () => {
-    skillStatusFilter = skillStatusSelect.value;
-    selectedSkillKeys.clear();
+    state.skillStatusFilter = skillStatusSelect.value;
+    state.selectedSkillKeys.clear();
     renderApp();
   });
   const skillTagSelect = document.querySelector<HTMLSelectElement>("#skill-tag-filter");
   skillTagSelect?.addEventListener("change", () => {
-    skillTagFilter = skillTagSelect.value;
-    selectedSkillKeys.clear();
-    skillPage = 1;
+    state.skillTagFilter = skillTagSelect.value;
+    state.selectedSkillKeys.clear();
+    state.skillPage = 1;
     renderApp();
   });
   document.querySelectorAll<HTMLButtonElement>("[data-group-select]").forEach((button) => {
     button.addEventListener("click", () => {
-      activeSkillGroupId = button.dataset.groupSelect ?? "";
-      selectedSkillKeys.clear();
-      skillPage = 1;
+      state.activeSkillGroupId = button.dataset.groupSelect ?? "";
+      state.selectedSkillKeys.clear();
+      state.skillPage = 1;
       renderApp();
     });
   });
@@ -2673,7 +2550,7 @@ function bindInteractions(): void {
       const id = button.dataset.groupDelete ?? "";
       const group = findSkillGroup(id);
       if (!group) return;
-      confirmDialog = {
+      state.confirmDialog = {
         title: "删除分组",
         message: `确认删除分组「${group.name}」？只删除分组本身，不会删除任何 Skill 文件。`,
         confirmLabel: "删除",
@@ -2698,22 +2575,22 @@ function bindInteractions(): void {
     }
   });
   document.querySelector<HTMLButtonElement>("#remove-from-group")?.addEventListener("click", () => {
-    if (!activeSkillGroupId) return;
-    removeSelectedFromGroup(activeSkillGroupId);
+    if (!state.activeSkillGroupId) return;
+    removeSelectedFromGroup(state.activeSkillGroupId);
     renderApp();
   });
   document.querySelector<HTMLButtonElement>("#assign-group")?.addEventListener("click", () => {
-    const target = document.querySelector<HTMLSelectElement>("#bulk-skill-target")?.value || skillBulkTargetId;
-    if (activeSkillGroupId) assignGroupToClient(activeSkillGroupId, target);
+    const target = document.querySelector<HTMLSelectElement>("#bulk-skill-target")?.value || state.skillBulkTargetId;
+    if (state.activeSkillGroupId) assignGroupToClient(state.activeSkillGroupId, target);
   });
   document.querySelector<HTMLButtonElement>("#group-dialog-cancel")?.addEventListener("click", () => {
-    skillGroupDialog = null;
+    state.skillGroupDialog = null;
     renderApp(true);
   });
   const groupNameInput = document.querySelector<HTMLInputElement>("#group-name-input");
   if (groupNameInput) {
     groupNameInput.addEventListener("input", () => {
-      if (skillGroupDialog) skillGroupDialog.name = groupNameInput.value;
+      if (state.skillGroupDialog) state.skillGroupDialog.name = groupNameInput.value;
     });
     groupNameInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
@@ -2725,7 +2602,7 @@ function bindInteractions(): void {
   }
   document.querySelector<HTMLButtonElement>("#group-dialog-confirm")?.addEventListener("click", () => {
     const input = document.querySelector<HTMLInputElement>("#group-name-input");
-    confirmSkillGroupDialog(input?.value ?? skillGroupDialog?.name ?? "");
+    confirmSkillGroupDialog(input?.value ?? state.skillGroupDialog?.name ?? "");
   });
   document.querySelectorAll<HTMLButtonElement>("[data-adopt-skill-path]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2737,16 +2614,16 @@ function bindInteractions(): void {
     button.addEventListener("click", () => {
       const path = button.dataset.linkSkillPath;
       if (!path) return;
-      skillLinkDialog = { skillPath: path, skillName: button.dataset.skillName ?? "该 Skill" };
+      state.skillLinkDialog = { skillPath: path, skillName: button.dataset.skillName ?? "该 Skill" };
       renderApp(true);
     });
   });
   document.querySelector<HTMLButtonElement>("#link-dialog-cancel")?.addEventListener("click", () => {
-    skillLinkDialog = null;
+    state.skillLinkDialog = null;
     renderApp(true);
   });
   document.querySelector<HTMLButtonElement>("#link-dialog-confirm")?.addEventListener("click", () => {
-    if (!skillLinkDialog) return;
+    if (!state.skillLinkDialog) return;
     const ids = [...document.querySelectorAll<HTMLInputElement>(".link-client-check")]
       .filter((c) => c.checked && !c.disabled)
       .map((c) => c.dataset.clientId ?? "")
@@ -2755,33 +2632,33 @@ function bindInteractions(): void {
       setSkillActionMessage("请勾选要链接的客户端", 2400);
       return;
     }
-    void linkSkillToClients(skillLinkDialog.skillPath, ids);
+    void linkSkillToClients(state.skillLinkDialog.skillPath, ids);
   });
   document.querySelectorAll<HTMLButtonElement>("[data-unlink-client]").forEach((button) => {
     button.addEventListener("click", () => {
       const cid = button.dataset.unlinkClient;
-      if (cid && skillLinkDialog) void unlinkSkillFromClients(skillLinkDialog.skillPath, [cid]);
+      if (cid && state.skillLinkDialog) void unlinkSkillFromClients(state.skillLinkDialog.skillPath, [cid]);
     });
   });
   const bulkSkillTarget = document.querySelector<HTMLSelectElement>("#bulk-skill-target");
   bulkSkillTarget?.addEventListener("change", () => {
-    skillBulkTargetId = bulkSkillTarget.value;
+    state.skillBulkTargetId = bulkSkillTarget.value;
     renderApp();
   });
   document.querySelector<HTMLButtonElement>("#copy-selected-skills")?.addEventListener("click", () => {
-    const target = document.querySelector<HTMLSelectElement>("#bulk-skill-target")?.value || skillBulkTargetId;
+    const target = document.querySelector<HTMLSelectElement>("#bulk-skill-target")?.value || state.skillBulkTargetId;
     void transferSkills(selectedPathsFromKeys(), target, "copy");
   });
   document.querySelector<HTMLButtonElement>("#move-selected-skills")?.addEventListener("click", () => {
-    const target = document.querySelector<HTMLSelectElement>("#bulk-skill-target")?.value || skillBulkTargetId;
+    const target = document.querySelector<HTMLSelectElement>("#bulk-skill-target")?.value || state.skillBulkTargetId;
     void transferSkills(selectedPathsFromKeys(), target, "move");
   });
   document.querySelectorAll<HTMLInputElement>(".skill-checkbox").forEach((checkbox) => {
     checkbox.addEventListener("change", () => {
       const key = checkbox.dataset.skillKey;
       if (!key) return;
-      if (checkbox.checked) selectedSkillKeys.add(key);
-      else selectedSkillKeys.delete(key);
+      if (checkbox.checked) state.selectedSkillKeys.add(key);
+      else state.selectedSkillKeys.delete(key);
       renderApp();
     });
   });
@@ -2791,18 +2668,18 @@ function bindInteractions(): void {
     document.querySelectorAll<HTMLInputElement>(".skill-checkbox").forEach((checkbox) => {
       const key = checkbox.dataset.skillKey;
       if (!key) return;
-      if (checked) selectedSkillKeys.add(key);
-      else selectedSkillKeys.delete(key);
+      if (checked) state.selectedSkillKeys.add(key);
+      else state.selectedSkillKeys.delete(key);
     });
     renderApp();
   });
   document.querySelector<HTMLButtonElement>("#clear-skill-selection")?.addEventListener("click", () => {
-    selectedSkillKeys.clear();
+    state.selectedSkillKeys.clear();
     renderApp();
   });
   document.querySelectorAll<HTMLButtonElement>(".skills-view-button[data-skill-view]").forEach((button) => {
     button.addEventListener("click", () => {
-      skillGridView = button.dataset.skillView === "grid";
+      state.skillGridView = button.dataset.skillView === "grid";
       renderApp();
     });
   });
@@ -2810,17 +2687,17 @@ function bindInteractions(): void {
     button.addEventListener("click", () => {
       const scope = button.dataset.pager;
       const dir = button.dataset.page === "next" ? 1 : -1;
-      if (scope === "skill") skillPage = Math.max(1, skillPage + dir);
-      else if (scope === "rule") rulePage = Math.max(1, rulePage + dir);
+      if (scope === "skill") state.skillPage = Math.max(1, state.skillPage + dir);
+      else if (scope === "rule") state.rulePage = Math.max(1, state.rulePage + dir);
       renderApp();
     });
   });
   document.querySelectorAll<HTMLSelectElement>(".pager-size[data-pager-size]").forEach((select) => {
     select.addEventListener("change", () => {
       const size = Number(select.value);
-      if (Number.isFinite(size) && size > 0) listPageSize = size;
-      skillPage = 1;
-      rulePage = 1;
+      if (Number.isFinite(size) && size > 0) state.listPageSize = size;
+      state.skillPage = 1;
+      state.rulePage = 1;
       renderApp();
     });
   });
@@ -2848,18 +2725,18 @@ function bindInteractions(): void {
   });
   document.querySelector<HTMLElement>(".app-shell")?.addEventListener("click", (event) => {
     const target = event.target as Element | null;
-    if (clientMenuOpen && !target?.closest(".client-menu-wrap")) {
-      clientMenuOpen = false;
+    if (state.clientMenuOpen && !target?.closest(".client-menu-wrap")) {
+      state.clientMenuOpen = false;
       renderApp();
       return;
     }
-    if (!skillContextMenu) return;
+    if (!state.skillContextMenu) return;
     if (target?.closest(".skill-context-menu")) return;
     closeSkillContextMenu();
   });
   document.querySelectorAll<HTMLButtonElement>(".tab[data-client-tab]").forEach((button) => button.addEventListener("click", () => {
-    skillContextMenu = null;
-    activeClientTab = (button.dataset.clientTab as ClientTab | undefined) ?? "skills";
+    state.skillContextMenu = null;
+    state.activeClientTab = (button.dataset.clientTab as ClientTab | undefined) ?? "skills";
     renderApp();
   }));
   const currentWindow = getCurrentWindow();
@@ -2870,23 +2747,23 @@ function bindInteractions(): void {
 
 if (import.meta.hot) {
   import.meta.hot.dispose((data: HotState) => {
-    data.activeClientIndex = activeClientIndex;
-    data.activeClientTab = activeClientTab;
-    data.currentView = currentView;
-    data.themeMode = themeMode;
-    data.environment = environment;
-    data.detectionError = detectionError;
-    data.installLogs = installLogs;
-    data.selectedSkillKeys = [...selectedSkillKeys];
-    data.skillBulkTargetId = skillBulkTargetId;
-    data.skillQuery = skillQuery;
-    data.skillClientFilter = skillClientFilter;
-    data.skillStatusFilter = skillStatusFilter;
-    data.skillTagFilter = skillTagFilter;
-    data.activeSkillGroupId = activeSkillGroupId;
-    data.updateInfo = updateInfo;
-    data.updateError = updateError;
-    data.updateChecking = updateChecking;
+    data.activeClientIndex = state.activeClientIndex;
+    data.activeClientTab = state.activeClientTab;
+    data.currentView = state.currentView;
+    data.themeMode = state.themeMode;
+    data.environment = state.environment;
+    data.detectionError = state.detectionError;
+    data.installLogs = state.installLogs;
+    data.selectedSkillKeys = [...state.selectedSkillKeys];
+    data.skillBulkTargetId = state.skillBulkTargetId;
+    data.skillQuery = state.skillQuery;
+    data.skillClientFilter = state.skillClientFilter;
+    data.skillStatusFilter = state.skillStatusFilter;
+    data.skillTagFilter = state.skillTagFilter;
+    data.activeSkillGroupId = state.activeSkillGroupId;
+    data.updateInfo = state.updateInfo;
+    data.updateError = state.updateError;
+    data.updateChecking = state.updateChecking;
     appRoot.innerHTML = "";
   });
   import.meta.hot.accept();
@@ -2894,8 +2771,8 @@ if (import.meta.hot) {
 
 // 主题“跟随系统”时，随系统日夜变化自动切换。
 window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", () => {
-  if (themeMode !== "system") return;
-  currentTheme = resolveTheme(themeMode);
+  if (state.themeMode !== "system") return;
+  state.currentTheme = resolveTheme(state.themeMode);
   applyThemeToDocument();
   syncThemeControls();
 });
