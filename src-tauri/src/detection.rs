@@ -7,8 +7,8 @@ use std::time::UNIX_EPOCH;
 
 #[derive(Debug, Clone)]
 struct ClientDefinition {
-    id: &'static str,
-    name: &'static str,
+    id: String,
+    name: String,
     product: &'static str,
     kind: &'static str,
     description: &'static str,
@@ -18,6 +18,8 @@ struct ClientDefinition {
     config_candidates: Vec<PathBuf>,
     skill_dirs: Vec<PathBuf>,
     rule_paths: Vec<PathBuf>,
+    source: String,
+    root_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -39,6 +41,8 @@ pub struct DetectedClient {
     pub roles_count: usize,
     pub updated_at: Option<String>,
     pub status_message: String,
+    pub source: String,
+    pub root_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -231,8 +235,7 @@ fn vscode_mcp_candidates() -> Vec<PathBuf> {
     paths
 }
 
-fn client_definitions() -> Vec<ClientDefinition> {
-    let home = home_dir();
+fn build_definitions(home: &Path) -> Vec<ClientDefinition> {
     let appdata = appdata_dir();
     let local = local_appdata_dir();
     let mut program_files = program_files_dirs();
@@ -271,8 +274,8 @@ fn client_definitions() -> Vec<ClientDefinition> {
 
     vec![
         ClientDefinition {
-            id: "claude",
-            name: "Claude Code",
+            id: "claude".into(),
+            name: "Claude Code".into(),
             product: "Claude Code",
             kind: "CLI 工具",
             description: "Anthropic Claude Code / Claude CLI，使用 ~/.claude.json 与 ~/.claude/skills",
@@ -282,10 +285,12 @@ fn client_definitions() -> Vec<ClientDefinition> {
             config_candidates: vec![home.join(".claude.json"), home.join(".claude").join("settings.json")],
             skill_dirs: vec![home.join(".claude").join("skills")],
             rule_paths: vec![home.join(".claude").join("CLAUDE.md"), home.join(".claude").join("rules")],
+            source: "windows".into(),
+            root_label: None,
         },
         ClientDefinition {
-            id: "claude-desktop",
-            name: "Claude Desktop",
+            id: "claude-desktop".into(),
+            name: "Claude Desktop".into(),
             product: "Claude Desktop",
             kind: "桌面应用",
             description: "Anthropic Claude Desktop，独立于 Claude Code/CLI",
@@ -300,10 +305,12 @@ fn client_definitions() -> Vec<ClientDefinition> {
             ],
             skill_dirs: vec![home.join(".claude-desktop").join("skills")],
             rule_paths: vec![home.join(".claude-desktop").join("rules")],
+            source: "windows".into(),
+            root_label: None,
         },
         ClientDefinition {
-            id: "codex",
-            name: "Codex",
+            id: "codex".into(),
+            name: "Codex".into(),
             product: "Codex",
             kind: "CLI 工具",
             description: "OpenAI Codex CLI，使用 ~/.codex/config.toml 与 ~/.codex/skills",
@@ -313,10 +320,12 @@ fn client_definitions() -> Vec<ClientDefinition> {
             config_candidates: vec![home.join(".codex").join("config.toml"), home.join(".codex").join("auth.json")],
             skill_dirs: vec![home.join(".codex").join("skills")],
             rule_paths: vec![home.join(".codex").join("AGENTS.md"), home.join(".codex").join("rules")],
+            source: "windows".into(),
+            root_label: None,
         },
         ClientDefinition {
-            id: "gemini",
-            name: "Gemini CLI",
+            id: "gemini".into(),
+            name: "Gemini CLI".into(),
             product: "Gemini",
             kind: "CLI 工具",
             description: "Google Gemini CLI，使用 ~/.gemini/settings.json 与 ~/.gemini/skills",
@@ -326,10 +335,12 @@ fn client_definitions() -> Vec<ClientDefinition> {
             config_candidates: vec![home.join(".gemini").join("settings.json"), home.join(".gemini").join(".env")],
             skill_dirs: vec![home.join(".gemini").join("skills")],
             rule_paths: vec![home.join(".gemini").join("GEMINI.md"), home.join(".gemini").join("rules")],
+            source: "windows".into(),
+            root_label: None,
         },
         ClientDefinition {
-            id: "opencode",
-            name: "OpenCode",
+            id: "opencode".into(),
+            name: "OpenCode".into(),
             product: "OpenCode",
             kind: "CLI 工具",
             description: "OpenCode CLI，本地 AI 编程 Agent",
@@ -342,10 +353,12 @@ fn client_definitions() -> Vec<ClientDefinition> {
                 home.join(".config").join("opencode").join("AGENTS.md"),
                 home.join(".config").join("opencode").join("rules"),
             ],
+            source: "windows".into(),
+            root_label: None,
         },
         ClientDefinition {
-            id: "openclaw",
-            name: "OpenClaw",
+            id: "openclaw".into(),
+            name: "OpenClaw".into(),
             product: "OpenClaw",
             kind: "CLI 工具",
             description: "OpenClaw Agent，使用 ~/.openclaw/openclaw.json 与 ~/.openclaw/skills",
@@ -359,10 +372,12 @@ fn client_definitions() -> Vec<ClientDefinition> {
                 home.join(".openclaw").join("SOUL.md"),
                 home.join(".openclaw").join("rules"),
             ],
+            source: "windows".into(),
+            root_label: None,
         },
         ClientDefinition {
-            id: "hermes",
-            name: "Hermes",
+            id: "hermes".into(),
+            name: "Hermes".into(),
             product: "Hermes",
             kind: "CLI 工具",
             description: "Hermes Agent，使用 ~/.hermes/config.yaml 与 ~/.hermes/skills",
@@ -372,10 +387,12 @@ fn client_definitions() -> Vec<ClientDefinition> {
             config_candidates: vec![home.join(".hermes").join("config.yaml")],
             skill_dirs: vec![home.join(".hermes").join("skills")],
             rule_paths: vec![home.join(".hermes").join("AGENTS.md"), home.join(".hermes").join("rules")],
+            source: "windows".into(),
+            root_label: None,
         },
         ClientDefinition {
-            id: "cursor",
-            name: "Cursor",
+            id: "cursor".into(),
+            name: "Cursor".into(),
             product: "Cursor",
             kind: "开发工具",
             description: "面向开发者的 AI 代码编辑器",
@@ -385,10 +402,12 @@ fn client_definitions() -> Vec<ClientDefinition> {
             config_candidates: vec![home.join(".cursor").join("mcp.json")],
             skill_dirs: vec![home.join(".cursor").join("skills")],
             rule_paths: vec![home.join(".cursor").join("rules"), home.join(".cursorrules")],
+            source: "windows".into(),
+            root_label: None,
         },
         ClientDefinition {
-            id: "vscode",
-            name: "VS Code",
+            id: "vscode".into(),
+            name: "VS Code".into(),
             product: "VS Code",
             kind: "开发工具",
             description: "Visual Studio Code 扩展集成",
@@ -398,10 +417,12 @@ fn client_definitions() -> Vec<ClientDefinition> {
             config_candidates: vscode_mcp_candidates(),
             skill_dirs: vec![],
             rule_paths: vec![home.join(".vscode").join("rules")],
+            source: "windows".into(),
+            root_label: None,
         },
         ClientDefinition {
-            id: "trae",
-            name: "Trae",
+            id: "trae".into(),
+            name: "Trae".into(),
             product: "Trae",
             kind: "开发工具",
             description: "Trae AI IDE，支持 MCP 与 Skills 扩展",
@@ -415,8 +436,52 @@ fn client_definitions() -> Vec<ClientDefinition> {
             ],
             skill_dirs: vec![home.join(".trae").join("skills")],
             rule_paths: vec![home.join(".trae").join("AGENTS.md"), home.join(".trae").join("rules")],
+            source: "windows".into(),
+            root_label: None,
         },
     ]
+}
+
+fn client_definitions() -> Vec<ClientDefinition> {
+    build_definitions(&home_dir())
+}
+
+/// 扩展扫描根（如 WSL 的 UNC 路径或任意自定义 home 目录）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtraRoot {
+    pub tag: String,
+    pub label: String,
+    pub path: String,
+    pub kind: String,
+}
+
+// 仅这些“纯 home 相对”的 CLI 客户端在扩展根（WSL）下有意义；
+// 桌面/IDE 客户端依赖 Windows 的 appdata/安装路径，扩展根下跳过。
+const EXTRA_ROOT_CLIENT_IDS: &[&str] = &["claude", "codex", "gemini", "opencode", "openclaw", "hermes"];
+
+fn definitions_for_extra_root(root: &ExtraRoot) -> Vec<ClientDefinition> {
+    build_definitions(Path::new(&root.path))
+        .into_iter()
+        .filter(|def| EXTRA_ROOT_CLIENT_IDS.contains(&def.id.as_str()))
+        .map(|mut def| {
+            def.id = format!("{}@{}", def.id, root.tag);
+            def.name = format!("{}（{}）", def.name, root.label);
+            def.exe_names = &[];
+            def.exe_candidates = vec![];
+            def.source = if root.kind.is_empty() { "custom".into() } else { root.kind.clone() };
+            def.root_label = Some(root.label.clone());
+            def
+        })
+        .collect()
+}
+
+fn definitions_with_extra_roots(extra_roots: &[ExtraRoot]) -> Vec<ClientDefinition> {
+    let mut defs = client_definitions();
+    for root in extra_roots {
+        defs.extend(definitions_for_extra_root(root));
+    }
+    defs
 }
 
 /// 返回某客户端可写入的 Skills 根目录（skill_dirs 的第一个）；用于市场安装“复制型”skill 落点。
@@ -528,8 +593,8 @@ fn collect_mcp_servers(definition: &ClientDefinition) -> Vec<DetectedMcpServer> 
                     if let Ok(root) = toml::from_str::<toml::Value>(&text) {
                         append_codex_toml_servers(
                             &mut servers,
-                            definition.id,
-                            definition.name,
+                            &definition.id,
+                            &definition.name,
                             &path,
                             &root,
                         );
@@ -542,7 +607,7 @@ fn collect_mcp_servers(definition: &ClientDefinition) -> Vec<DetectedMcpServer> 
         if definition.id == "opencode" {
             if let Some(root) = parse_config_file(&path) {
                 if let Some(map) = root.get("mcp").and_then(Value::as_object) {
-                    append_servers_from_map(&mut servers, definition.id, definition.name, &path, map);
+                    append_servers_from_map(&mut servers, &definition.id, &definition.name, &path, map);
                 }
             }
             continue;
@@ -551,10 +616,10 @@ fn collect_mcp_servers(definition: &ClientDefinition) -> Vec<DetectedMcpServer> 
         if definition.id == "gemini" {
             if let Some(root) = parse_config_file(&path) {
                 if let Some(map) = root.get("mcpServers").and_then(Value::as_object) {
-                    append_servers_from_map(&mut servers, definition.id, definition.name, &path, map);
+                    append_servers_from_map(&mut servers, &definition.id, &definition.name, &path, map);
                 }
                 if let Some(map) = root.get("mcpServersDisabled").and_then(Value::as_object) {
-                    append_servers_from_map(&mut servers, definition.id, definition.name, &path, map);
+                    append_servers_from_map(&mut servers, &definition.id, &definition.name, &path, map);
                 }
             }
             continue;
@@ -563,7 +628,7 @@ fn collect_mcp_servers(definition: &ClientDefinition) -> Vec<DetectedMcpServer> 
         if definition.id == "hermes" {
             if let Some(root) = parse_yaml_file_as_json(&path) {
                 if let Some(map) = root.get("mcp_servers").and_then(Value::as_object) {
-                    append_servers_from_map(&mut servers, definition.id, definition.name, &path, map);
+                    append_servers_from_map(&mut servers, &definition.id, &definition.name, &path, map);
                 }
             }
             continue;
@@ -577,11 +642,11 @@ fn collect_mcp_servers(definition: &ClientDefinition) -> Vec<DetectedMcpServer> 
         if definition.id == "vscode" {
             if let Some(root) = parse_config_file(&path) {
                 if let Some(map) = root.get("servers").and_then(Value::as_object) {
-                    append_servers_from_map(&mut servers, definition.id, definition.name, &path, map);
+                    append_servers_from_map(&mut servers, &definition.id, &definition.name, &path, map);
                 }
                 if let Some(mcp) = root.get("mcp").and_then(Value::as_object) {
                     if let Some(map) = mcp.get("servers").and_then(Value::as_object) {
-                        append_servers_from_map(&mut servers, definition.id, definition.name, &path, map);
+                        append_servers_from_map(&mut servers, &definition.id, &definition.name, &path, map);
                     }
                 }
             }
@@ -590,12 +655,12 @@ fn collect_mcp_servers(definition: &ClientDefinition) -> Vec<DetectedMcpServer> 
 
         if let Some(root) = parse_config_file(&path) {
             if let Some(map) = root.get("mcpServers").and_then(Value::as_object) {
-                append_servers_from_map(&mut servers, definition.id, definition.name, &path, map);
+                append_servers_from_map(&mut servers, &definition.id, &definition.name, &path, map);
             } else if let Some(map) = root.get("servers").and_then(Value::as_object) {
-                append_servers_from_map(&mut servers, definition.id, definition.name, &path, map);
+                append_servers_from_map(&mut servers, &definition.id, &definition.name, &path, map);
             }
             if let Some(map) = root.get("mcpServersDisabled").and_then(Value::as_object) {
-                append_servers_from_map(&mut servers, definition.id, definition.name, &path, map);
+                append_servers_from_map(&mut servers, &definition.id, &definition.name, &path, map);
             }
         }
     }
@@ -826,7 +891,7 @@ fn collect_skills(definitions: &[ClientDefinition]) -> Vec<DetectedSkill> {
 
     for definition in definitions {
         for dir in &definition.skill_dirs {
-            for skill in scan_skill_dir(dir, definition.id, definition.name, false) {
+            for skill in scan_skill_dir(dir, &definition.id, &definition.name, false) {
                 let key = format!("{}:{}", skill.client_id, skill.path);
                 if seen.insert(key) {
                     skills.push(skill);
@@ -1011,7 +1076,7 @@ fn collect_rules(definitions: &[ClientDefinition]) -> Vec<DetectedRule> {
 
     for definition in definitions {
         for path in &definition.rule_paths {
-            for rule in scan_rule_path(path, definition.id, definition.name, false) {
+            for rule in scan_rule_path(path, &definition.id, &definition.name, false) {
                 let key = format!("{}:{}", rule.client_id, rule.path);
                 if seen.insert(key) {
                     rules.push(rule);
@@ -1033,8 +1098,8 @@ fn collect_rules(definitions: &[ClientDefinition]) -> Vec<DetectedRule> {
 }
 
 #[tauri::command]
-pub fn detect_environment() -> DetectionSnapshot {
-    let definitions = client_definitions();
+pub fn detect_environment(extra_roots: Vec<ExtraRoot>) -> DetectionSnapshot {
+    let definitions = definitions_with_extra_roots(&extra_roots);
     let mut all_mcp = Vec::new();
     let all_skills = collect_skills(&definitions);
     let all_rules = collect_rules(&definitions);
@@ -1090,10 +1155,12 @@ pub fn detect_environment() -> DetectionSnapshot {
             detected_config_paths: detected_config_paths.iter().map(|p| path_to_string(p)).collect(),
             install_url: definition.install_url.to_string(),
             mcp_count,
-            skills_count: skills_by_client.get(definition.id).copied().unwrap_or(0),
-            roles_count: rules_by_client.get(definition.id).copied().unwrap_or(0),
+            skills_count: skills_by_client.get(definition.id.as_str()).copied().unwrap_or(0),
+            roles_count: rules_by_client.get(definition.id.as_str()).copied().unwrap_or(0),
             updated_at,
             status_message,
+            source: definition.source.clone(),
+            root_label: definition.root_label.clone(),
         });
     }
 
@@ -1192,13 +1259,76 @@ fn move_dir_to_trash(from: &Path, to: &Path) -> Result<(), String> {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WslDistro {
+    pub distro: String,
+    pub user: String,
+    pub home_unc: String,
+}
+
+// wsl.exe -l -q 的输出是 UTF-16LE，需手动解码。
+fn decode_utf16le(bytes: &[u8]) -> String {
+    let units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
+    String::from_utf16_lossy(&units)
+}
+
+#[tauri::command]
+pub fn list_wsl_distros() -> Result<Vec<WslDistro>, String> {
+    let output = Command::new("wsl.exe")
+        .args(["-l", "-q"])
+        .output()
+        .map_err(|e| format!("无法调用 wsl.exe（可能未安装 WSL）：{e}"))?;
+    if !output.status.success() {
+        return Err("wsl.exe 返回错误，可能未安装 WSL 或没有发行版".to_string());
+    }
+    let listing = decode_utf16le(&output.stdout);
+    let mut distros = Vec::new();
+    for raw in listing.lines() {
+        let name = raw
+            .trim()
+            .trim_matches('\u{feff}')
+            .trim_matches('\u{0}')
+            .trim();
+        if name.is_empty() {
+            continue;
+        }
+        // 取该发行版的 $HOME（Linux 命令输出为 UTF-8）。
+        let home = Command::new("wsl.exe")
+            .args(["-d", name, "--", "sh", "-c", "echo $HOME"])
+            .output()
+            .ok()
+            .and_then(|out| {
+                if out.status.success() {
+                    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+                } else {
+                    None
+                }
+            })
+            .filter(|h| h.starts_with('/'))
+            .unwrap_or_else(|| "/root".to_string());
+        let user = home.rsplit('/').next().unwrap_or("").to_string();
+        let home_unc = format!("\\\\wsl.localhost\\{}{}", name, home.replace('/', "\\"));
+        distros.push(WslDistro {
+            distro: name.to_string(),
+            user,
+            home_unc,
+        });
+    }
+    Ok(distros)
+}
+
 #[tauri::command(rename_all = "camelCase")]
 pub fn transfer_skills(
     paths: Vec<String>,
     target_client_id: String,
     action: String,
+    extra_roots: Vec<ExtraRoot>,
 ) -> Result<TransferSkillsResult, String> {
-    let definitions = client_definitions();
+    let definitions = definitions_with_extra_roots(&extra_roots);
     let Some(target_definition) = definitions.iter().find(|item| item.id == target_client_id) else {
         return Err(format!("未知目标客户端: {target_client_id}"));
     };

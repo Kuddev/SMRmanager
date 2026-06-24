@@ -7,6 +7,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             detection::detect_environment,
+            detection::list_wsl_distros,
             detection::delete_skills,
             detection::transfer_skills,
             detection::import_skill,

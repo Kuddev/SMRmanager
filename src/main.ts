@@ -37,7 +37,12 @@ type RuntimeClient = {
   rolesCount: number;
   updatedAt?: string | null;
   statusMessage: string;
+  source?: string;
+  rootLabel?: string | null;
 };
+
+type ScanRoot = { tag: string; label: string; path: string; kind: "wsl" | "custom" };
+type WslDistro = { distro: string; user: string; homeUnc: string };
 
 type RuntimeMcpServer = {
   id: string;
@@ -459,6 +464,7 @@ const marketMcps: MarketMcp[] = [
 const themeStorageKey = "smrmanager-theme";
 const dismissedUpdateStorageKey = "smrmanager-update-dismissed-version";
 const skillGroupsStorageKey = "smrmanager-skill-groups";
+const scanRootsStorageKey = "smrmanager-scan-roots";
 const hotState = import.meta.hot?.data as HotState | undefined;
 const hotView = hotState?.currentView as ViewName | "roles" | undefined;
 let activeClientIndex = hotState?.activeClientIndex ?? 0;
@@ -493,6 +499,10 @@ let skillStatusFilter = hotState?.skillStatusFilter ?? "all";
 let skillTagFilter = hotState?.skillTagFilter ?? "all";
 let activeSkillGroupId = hotState?.activeSkillGroupId ?? "";
 let skillGroups: SkillGroup[] = loadSkillGroups();
+let scanRoots: ScanRoot[] = loadScanRoots();
+let wslDistros: WslDistro[] = [];
+let wslDetecting = false;
+let wslDetectError: string | null = null;
 let skillGroupDialog: SkillGroupDialogState | null = null;
 let skillGridView = false;
 let skillPage = 1;
@@ -545,6 +555,84 @@ function saveSkillGroups(): void {
     // 持久化失败（如隐私模式/配额）忽略，不影响本会话内的分组使用。
   }
 }
+
+function loadScanRoots(): ScanRoot[] {
+  try {
+    const raw = localStorage.getItem(scanRootsStorageKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (item): item is ScanRoot =>
+          Boolean(item) &&
+          typeof item.tag === "string" &&
+          typeof item.label === "string" &&
+          typeof item.path === "string"
+      )
+      .map((item) => ({
+        tag: item.tag,
+        label: item.label,
+        path: item.path,
+        kind: item.kind === "wsl" ? "wsl" : "custom"
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function saveScanRoots(): void {
+  try {
+    localStorage.setItem(scanRootsStorageKey, JSON.stringify(scanRoots));
+  } catch {
+    // 持久化失败忽略。
+  }
+}
+
+function addScanRoot(root: ScanRoot): void {
+  const path = root.path.trim();
+  if (!path) return;
+  if (scanRoots.some((item) => item.path.toLowerCase() === path.toLowerCase())) {
+    setSkillActionMessage("该扫描目录已添加", 2600);
+    return;
+  }
+  scanRoots = [...scanRoots, { ...root, path }];
+  saveScanRoots();
+  void loadEnvironment(true);
+}
+
+function removeScanRoot(tag: string): void {
+  scanRoots = scanRoots.filter((item) => item.tag !== tag);
+  saveScanRoots();
+  void loadEnvironment(true);
+}
+
+async function detectWslDistros(): Promise<void> {
+  if (wslDetecting) return;
+  wslDetecting = true;
+  wslDetectError = null;
+  renderApp(true);
+  try {
+    wslDistros = await invoke<WslDistro[]>("list_wsl_distros");
+    if (wslDistros.length === 0) wslDetectError = "未检测到 WSL 发行版";
+  } catch (error) {
+    wslDistros = [];
+    wslDetectError = error instanceof Error ? error.message : String(error);
+  } finally {
+    wslDetecting = false;
+    renderApp(true);
+  }
+}
+
+function addWslDistroAsRoot(distro: WslDistro): void {
+  addScanRoot({
+    tag: `wsl-${distro.distro}`,
+    label: `WSL: ${distro.distro}`,
+    path: distro.homeUnc,
+    kind: "wsl"
+  });
+}
+
 
 function systemPrefersDark(): boolean {
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
@@ -611,6 +699,37 @@ function clientRules(clientId: string): RuntimeRule[] {
 
 function installedClients(): RuntimeClient[] {
   return environment?.clients.filter((item) => item.installed) ?? [];
+}
+
+// 扩展根/WSL 检测出的客户端（source 非 windows），合成为 Client 以便在客户端页独立展示。
+function extraRuntimeClients(): RuntimeClient[] {
+  return (environment?.clients ?? []).filter((item) => item.source && item.source !== "windows");
+}
+
+function displayClients(): Client[] {
+  const extra = extraRuntimeClients().map((rt): Client => {
+    const baseId = rt.id.split("@")[0];
+    const base = clients.find((b) => b.id === baseId);
+    return {
+      id: rt.id,
+      name: rt.name,
+      type: rt.source === "wsl" ? "WSL 客户端" : "扩展目录",
+      fallbackPath: rt.detectedConfigPaths[0] ?? "",
+      description: rt.description,
+      iconFile: base?.iconFile ?? "/client-icons/claude.svg",
+      installUrl: rt.installUrl
+    };
+  });
+  return [...clients, ...extra];
+}
+
+// WSL/扩展根来源的客户端 id 集合；判断某 skill 是否来自 WSL（只读保护用）。
+function extraClientIdSet(): Set<string> {
+  return new Set(extraRuntimeClients().map((item) => item.id));
+}
+
+function isExtraSourceSkill(skill: RuntimeSkill): boolean {
+  return extraClientIdSet().has(skill.clientId);
 }
 
 const skillWritableClientIds = new Set(["claude", "claude-desktop", "codex", "gemini", "opencode", "openclaw", "hermes", "cursor", "trae"]);
@@ -702,10 +821,11 @@ async function loadEnvironment(force = false): Promise<void> {
   detectionLoading = true;
   renderApp();
   try {
-    environment = await invoke<DetectionSnapshot>("detect_environment");
+    environment = await invoke<DetectionSnapshot>("detect_environment", { extraRoots: scanRoots });
     detectionError = null;
-    const selected = clients[activeClientIndex] ?? clients[0];
-    const firstInstalled = clients.findIndex((item) => runtime(item)?.installed);
+    const list = displayClients();
+    const selected = list[activeClientIndex] ?? list[0];
+    const firstInstalled = list.findIndex((item) => runtime(item)?.installed);
     if (!runtime(selected)?.installed && firstInstalled >= 0) activeClientIndex = firstInstalled;
   } catch (error) {
     detectionError = error instanceof Error ? error.message : String(error);
@@ -949,7 +1069,8 @@ async function transferSkills(paths: string[], targetClientId: string, action: S
     const result = await invoke<TransferSkillsResult>("transfer_skills", {
       paths: uniquePaths,
       targetClientId,
-      action
+      action,
+      extraRoots: scanRoots
     });
     const done = action === "move" ? result.moved : result.copied;
     const failedText = result.failed.length ? `；失败 ${result.failed.length} 个：${result.failed.join(" / ")}` : "";
@@ -1208,21 +1329,26 @@ function renderSidebar(): string {
 }
 
 function renderClientsList(): string {
-  const rows = clients
+  const list = displayClients();
+  const rows = list
     .map((client, index) => {
       const rt = runtime(client);
       const installed = rt?.installed ?? false;
+      const isWsl = rt?.source === "wsl";
+      const badge = rt && rt.source && rt.source !== "windows"
+        ? `<span class="client-source-badge ${isWsl ? "wsl" : "custom"}">${isWsl ? "WSL" : "扩展"}</span>`
+        : "";
       return `
         <button class="client-row ${index === activeClientIndex ? "is-selected" : ""} ${installed ? "is-installed" : "is-missing"}" data-client-index="${index}" type="button">
           <span class="avatar mini image">${img(client.iconFile, client.name)}</span>
-          <span class="client-row-copy"><strong>${html(client.name)}</strong><small>${installed ? `${rt?.mcpCount ?? 0} MCP / ${rt?.skillsCount ?? 0} Skills` : "未安装"}</small></span>
+          <span class="client-row-copy"><strong>${html(client.name)}${badge}</strong><small>${installed ? `${rt?.mcpCount ?? 0} MCP / ${rt?.skillsCount ?? 0} Skills` : "未安装"}</small></span>
           <span class="client-status-dot ${installed ? "installed" : "missing"}"></span>
         </button>`;
     })
     .join("");
   return `
     <section class="client-list-card">
-      <div class="list-heading"><strong>全部客户端</strong><span>${clients.length}</span></div>
+      <div class="list-heading"><strong>全部客户端</strong><span>${list.length}</span></div>
       ${detectionError ? `<div class="status-banner danger">检测失败：${html(detectionError)}</div>` : ""}
       <div class="client-list">${rows}</div>
       <button id="refresh-detection" class="text-action" type="button"><span>${svgIcon("refresh", 15)}</span>${detectionLoading ? "检测中..." : "重新检测"}</button>
@@ -1421,7 +1547,7 @@ function renderInspector(client: Client): string {
 }
 
 function renderClientView(): string {
-  const client = clients[activeClientIndex] ?? clients[0];
+  const client = displayClients()[activeClientIndex] ?? clients[0];
   return `<main class="workspace"><div class="dashboard-grid">${renderClientsList()}${renderClientMain(client)}${renderInspector(client)}</div></main>`;
 }
 
@@ -1564,11 +1690,15 @@ function renderSkillsView(): string {
   if (bulkTargetId && skillBulkTargetId !== bulkTargetId && !bulkTargets.some((client) => client.id === skillBulkTargetId)) {
     skillBulkTargetId = bulkTargetId;
   }
+  // WSL/扩展根来源的 skill 只读：禁止删除/移动（=从 WSL 删源），仅允许复制到 Windows。
+  const wslSkillKeys = new Set((environment?.skills ?? []).filter(isExtraSourceSkill).map(skillKey));
+  const selectionHasExtra = [...selectedSkillKeys].some((key) => wslSkillKeys.has(key));
   const rows = pageSkills
     .map(
       (skill) => {
         const key = skillKey(skill);
         const selected = selectedSkillKeys.has(key);
+        const isExtra = isExtraSourceSkill(skill);
         return `
       <article class="skill-list-row ${selected ? "is-selected" : ""}" data-skill-key="${html(key)}" data-skill-path="${html(skill.path)}">
         <label class="skill-check" title="选择 ${html(skill.name)}">
@@ -1576,14 +1706,14 @@ function renderSkillsView(): string {
         </label>
         <div class="skill-row-icon ${skillTone(skill)}">${html(skillInitials(skill.name))}</div>
         <div class="skill-row-main">
-          <div class="skill-row-title"><strong>${html(skill.name)}</strong></div>
+          <div class="skill-row-title"><strong>${html(skill.name)}</strong>${isExtra ? `<span class="skill-readonly-pill">${html(skill.clientName.includes("WSL") ? "WSL · 只读" : "只读")}</span>` : ""}</div>
           <p>${html(skillDescription(skill))}</p>
           <div class="skill-chip-row">${skillTags(skill).map((tag) => `<span>${html(tag)}</span>`).join("")}</div>
           <code>${html(skill.path)}</code>
         </div>
         <div class="skill-row-meta source"><span>客户端</span><strong>${html(skill.clientName)}</strong></div>
         <div class="skill-row-meta updated"><span>更新时间</span><strong>${formatUpdated(skill.updatedAt)}</strong></div>
-        <button class="skill-delete-button" data-delete-skill-path="${html(skill.path)}" data-skill-name="${html(skill.name)}" type="button" ${deleteBusy ? "disabled" : ""}>删除</button>
+        <button class="skill-delete-button" data-delete-skill-path="${html(skill.path)}" data-skill-name="${html(skill.name)}" type="button" ${deleteBusy || isExtra ? "disabled" : ""} ${isExtra ? 'title="WSL/扩展来源只读，不能删除"' : ""}>删除</button>
       </article>`;
       }
     )
@@ -1651,8 +1781,8 @@ function renderSkillsView(): string {
         </select>
         ${activeGroup ? `<button id="assign-group" class="transfer-mini-button assign-group-button" type="button" title="把分组「${html(activeGroup.name)}」全部复制到目标客户端" ${groupMemberCount(activeGroup) === 0 || skillTransferBusy || !bulkTargetId ? "disabled" : ""}>一键赋予整组到目标</button>` : ""}
         <button id="copy-selected-skills" class="ghost-mini-button transfer-mini-button" type="button" ${selectedSkillKeys.size === 0 || skillTransferBusy || !bulkTargetId ? "disabled" : ""}>批量复制到</button>
-        <button id="move-selected-skills" class="ghost-mini-button transfer-mini-button" type="button" ${selectedSkillKeys.size === 0 || skillTransferBusy || !bulkTargetId ? "disabled" : ""}>批量移动到</button>
-        <button id="delete-selected-skills" class="danger-mini-button" type="button" ${selectedSkillKeys.size === 0 || deleteBusy ? "disabled" : ""}>${deleteBusy ? "删除中..." : "批量删除"}</button>
+        <button id="move-selected-skills" class="ghost-mini-button transfer-mini-button" type="button" ${selectedSkillKeys.size === 0 || skillTransferBusy || !bulkTargetId || selectionHasExtra ? "disabled" : ""} ${selectionHasExtra ? 'title="WSL/扩展来源只读，不能移动；可用“批量复制到”"' : ""}>批量移动到</button>
+        <button id="delete-selected-skills" class="danger-mini-button" type="button" ${selectedSkillKeys.size === 0 || deleteBusy || selectionHasExtra ? "disabled" : ""} ${selectionHasExtra ? 'title="WSL/扩展来源只读，不能删除"' : ""}>${deleteBusy ? "删除中..." : "批量删除"}</button>
         <button id="clear-skill-selection" class="ghost-mini-button" type="button" ${selectedSkillKeys.size === 0 ? "disabled" : ""}>清空选择</button>
       </div>
       <div class="skill-list-table ${skillGridView ? "is-grid" : ""}">${rows || `<div class="empty-config-panel">未检测到已安装 Skills。可以去市场用 npm / npx / pnpm / GitHub / JSON 安装。</div>`}</div>
@@ -1791,6 +1921,39 @@ function renderSettingsView(): string {
               <button class="theme-seg ${themeMode === "system" ? "is-active" : ""}" data-theme-mode="system" type="button">跟随系统</button>
             </div>
           </div>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-section-title"><div><h3>扩展扫描目录 / WSL</h3><p>把 WSL 或任意自定义 home 目录加入检测，读取其中的 Skills / MCP / Rules（只读，可复制到 Windows 客户端）。</p></div></div>
+          <div class="scan-roots-actions">
+            <button id="detect-wsl" class="secondary-button" type="button" ${wslDetecting ? "disabled" : ""}>${wslDetecting ? "检测中..." : "检测 WSL 发行版"}</button>
+          </div>
+          ${wslDetectError ? `<div class="status-banner danger">${html(wslDetectError)}</div>` : ""}
+          ${
+            wslDistros.length > 0
+              ? `<div class="wsl-distro-list">${wslDistros
+                  .map((d) => {
+                    const added = scanRoots.some((r) => r.path.toLowerCase() === d.homeUnc.toLowerCase());
+                    return `<div class="wsl-distro-row"><div><strong>${html(d.distro)}</strong><code>${html(d.homeUnc)}</code></div><button class="ghost-mini-button" data-add-wsl="${html(d.distro)}" type="button" ${added ? "disabled" : ""}>${added ? "已添加" : "添加"}</button></div>`;
+                  })
+                  .join("")}</div>`
+              : ""
+          }
+          <div class="scan-roots-manual">
+            <input id="scan-root-label" class="group-name-input" type="text" maxlength="40" placeholder="标签（如 WSL: Ubuntu）" />
+            <input id="scan-root-path" class="group-name-input" type="text" placeholder="路径（如 \\\\wsl.localhost\\Ubuntu\\home\\you）" />
+            <button id="add-scan-root" class="secondary-button" type="button">添加目录</button>
+          </div>
+          ${
+            scanRoots.length > 0
+              ? `<div class="scan-roots-list">${scanRoots
+                  .map(
+                    (r) =>
+                      `<div class="scan-root-row"><span class="client-source-badge ${r.kind === "wsl" ? "wsl" : "custom"}">${r.kind === "wsl" ? "WSL" : "扩展"}</span><div><strong>${html(r.label)}</strong><code>${html(r.path)}</code></div><button class="ghost-mini-button" data-remove-root="${html(r.tag)}" type="button">移除</button></div>`
+                  )
+                  .join("")}</div>`
+              : `<p class="scan-roots-empty">尚未添加扩展扫描目录。</p>`
+          }
         </section>
       </section>
     </main>`;
@@ -2233,6 +2396,30 @@ function bindInteractions(): void {
   document.querySelector<HTMLButtonElement>("#dismiss-update-version")?.addEventListener("click", () => {
     if (updateInfo?.latestVersion) localStorage.setItem(dismissedUpdateStorageKey, updateInfo.latestVersion);
     renderApp();
+  });
+  document.querySelector<HTMLButtonElement>("#detect-wsl")?.addEventListener("click", () => void detectWslDistros());
+  document.querySelectorAll<HTMLButtonElement>("[data-add-wsl]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const distro = wslDistros.find((d) => d.distro === button.dataset.addWsl);
+      if (distro) addWslDistroAsRoot(distro);
+    });
+  });
+  document.querySelector<HTMLButtonElement>("#add-scan-root")?.addEventListener("click", () => {
+    const labelInput = document.querySelector<HTMLInputElement>("#scan-root-label");
+    const pathInput = document.querySelector<HTMLInputElement>("#scan-root-path");
+    const path = pathInput?.value.trim() ?? "";
+    if (!path) {
+      setSkillActionMessage("请填写扫描目录路径", 2600);
+      return;
+    }
+    const label = labelInput?.value.trim() || path;
+    addScanRoot({ tag: `custom-${Date.now()}`, label, path, kind: "custom" });
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-remove-root]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const tag = button.dataset.removeRoot;
+      if (tag) removeScanRoot(tag);
+    });
   });
   document.querySelector<HTMLButtonElement>("#sidebar-update-open")?.addEventListener("click", () => {
     currentView = "settings";

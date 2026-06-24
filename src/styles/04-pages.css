@@ -703,6 +703,94 @@
   font-size: 13px;
 }
 
+/* —— WSL / 扩展来源标识 —— */
+.client-source-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 850;
+  vertical-align: middle;
+  color: #fff;
+}
+.client-source-badge.wsl {
+  background: #2563eb;
+}
+.client-source-badge.custom {
+  background: #6b7280;
+}
+
+.skill-readonly-pill {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+/* —— 设置页：扩展扫描目录 / WSL —— */
+.scan-roots-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.wsl-distro-list,
+.scan-roots-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.wsl-distro-row,
+.scan-root-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.wsl-distro-row > div,
+.scan-root-row > div {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wsl-distro-row code,
+.scan-root-row code {
+  color: var(--muted);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.scan-roots-manual {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.scan-roots-manual .group-name-input {
+  flex: 1 1 200px;
+  width: auto;
+}
+
+.scan-roots-empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .skill-list-table {
   display: grid;
   gap: 8px;
