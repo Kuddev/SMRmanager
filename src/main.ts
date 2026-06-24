@@ -4,470 +4,55 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import "./day-night-toggle";
 import "./styles.css";
 
-type ViewName = "clients" | "skills" | "wsl" | "mcp" | "rules" | "market" | "settings";
-type ClientTab = "skills" | "mcp" | "rules" | "settings";
-type ThemeName = "light" | "dark";
-type ThemeMode = "light" | "dark" | "system";
-type InstallMethodId = "npm" | "npx" | "pnpm" | "github" | "json";
-type SkillTransferAction = "copy" | "move";
+import type {
+  ViewName,
+  ClientTab,
+  ThemeName,
+  ThemeMode,
+  InstallMethodId,
+  SkillTransferAction,
+  Client,
+  RuntimeClient,
+  ScanRoot,
+  WslDistro,
+  GitInspectResult,
+  GitApplyResult,
+  GitInstallDialogState,
+  RuntimeMcpServer,
+  RuntimeSkill,
+  SkillGroup,
+  SkillGroupDialogState,
+  RuntimeRule,
+  DetectionSnapshot,
+  InstallMethod,
+  MarketSkill,
+  MarketMcp,
+  InstallResult,
+  DeleteSkillsResult,
+  TransferSkillsResult,
+  ImportSkillResult,
+  ImportSkillDialogState,
+  MarketInstallDialogState,
+  McpInstallDialogState,
+  SkillContextMenuState,
+  ConfirmDialogState,
+  AppUpdateCheckResult,
+  HotState
+} from "./types";
 
-type Client = {
-  id: string;
-  name: string;
-  type: string;
-  fallbackPath: string;
-  description: string;
-  iconFile: string;
-  installUrl: string;
-};
 
-type RuntimeClient = {
-  id: string;
-  name: string;
-  product: string;
-  type: string;
-  description: string;
-  installed: boolean;
-  executablePath?: string | null;
-  configPaths: string[];
-  detectedConfigPaths: string[];
-  installUrl: string;
-  mcpCount: number;
-  skillsCount: number;
-  rolesCount: number;
-  updatedAt?: string | null;
-  statusMessage: string;
-  source?: string;
-  rootLabel?: string | null;
-};
-
-type ScanRoot = { tag: string; label: string; path: string; kind: "wsl" | "custom" };
-type WslDistro = { distro: string; user: string; homeUnc: string; running: boolean; isDefault: boolean };
-type GitSkillEntry = { relPath: string; name: string; description: string };
-type GitMcpEntry = { name: string; transport: string; command?: string | null; args?: string[] | null; url?: string | null };
-type GitInspectResult = { cachePath: string; skills: GitSkillEntry[]; mcpServers: GitMcpEntry[] };
-type GitApplyResult = { skillsInstalled: number; mcpInstalled: number; failed: string[]; message: string };
-type GitInstallDialogState = { url: string; subdir: string; loading: boolean; inspected: GitInspectResult | null; error: string | null };
-
-type RuntimeMcpServer = {
-  id: string;
-  name: string;
-  clientId: string;
-  clientName: string;
-  sourcePath: string;
-  transport: string;
-  command?: string | null;
-  url?: string | null;
-  enabled: boolean;
-};
-
-type RuntimeSkill = {
-  directory: string;
-  name: string;
-  description?: string | null;
-  clientId: string;
-  clientName: string;
-  path: string;
-  managed: boolean;
-  updatedAt?: string | null;
-  tags?: string[];
-  linked?: boolean;
-  linkedClients?: string[];
-};
-
-type SkillGroup = {
-  id: string;
-  name: string;
-  memberKeys: string[];
-};
-
-type SkillGroupDialogState = {
-  mode: "create" | "rename";
-  id?: string;
-  name: string;
-  addSelected?: boolean;
-};
-
-type RuntimeRule = {
-  name: string;
-  clientId: string;
-  clientName: string;
-  path: string;
-  kind: string;
-  source: string;
-  preview?: string | null;
-  managed: boolean;
-  updatedAt?: string | null;
-};
-
-type DetectionSnapshot = {
-  clients: RuntimeClient[];
-  mcpServers: RuntimeMcpServer[];
-  skills: RuntimeSkill[];
-  rules: RuntimeRule[];
-  scannedAt: string;
-};
-
-type InstallMethod = {
-  id: InstallMethodId;
-  label: string;
-  detail: string;
-  packageName?: string;
-  args?: string[];
-  repository?: string;
-  subdir?: string;
-  registryUrl?: string;
-  manifestUrl?: string;
-};
-
-type MarketSkill = {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  tone: string;
-  rating: string;
-  installs: string;
-  repo: string;
-  iconFile: string;
-  supportedClients: string[];
-  methods: InstallMethod[];
-};
-
-type MarketMcp = {
-  id: string;
-  name: string;
-  description: string;
-  iconFile: string;
-  tone: string;
-  transport: string;
-  command?: string;
-  args?: string[];
-  url?: string;
-};
-
-type InstallResult = {
-  success: boolean;
-  message: string;
-  log: string;
-  installedPath?: string | null;
-};
-
-type DeleteSkillsResult = {
-  deleted: number;
-  movedToTrash: string[];
-  failed: string[];
-  message: string;
-};
-
-type TransferSkillsResult = {
-  copied: number;
-  moved: number;
-  targetClientId: string;
-  targetClientName: string;
-  targetRoot: string;
-  writtenPaths: string[];
-  failed: string[];
-  message: string;
-};
-
-type ImportSkillResult = {
-  imported: boolean;
-  targetClientId: string;
-  targetClientName: string;
-  targetPath: string;
-  message: string;
-};
-
-type ImportSkillDialogState = {
-  sourceDir: string;
-  targetClientId: string;
-};
-
-type MarketInstallDialogState = {
-  skillId: string;
-  methodId: string;
-  targetClientId: string;
-};
-
-type McpInstallDialogState = {
-  mcpId: string;
-  targetClientId: string;
-};
-
-type SkillContextMenuState = {
-  key: string;
-  path: string;
-  x: number;
-  y: number;
-};
-
-type ConfirmDialogState = {
-  title: string;
-  message: string;
-  confirmLabel: string;
-  cancelLabel: string;
-  paths: string[];
-  kind?: "skills" | "client" | "group";
-  clientId?: string;
-  groupId?: string;
-};
-
-type AppUpdateCheckResult = {
-  currentVersion: string;
-  latestVersion?: string | null;
-  available: boolean;
-  notes?: string | null;
-  pubDate?: string | null;
-  releaseUrl?: string | null;
-  downloadUrl?: string | null;
-  sourceUrl: string;
-  checkedAt: string;
-};
-
-type HotState = {
-  activeClientIndex?: number;
-  activeClientTab?: ClientTab;
-  currentView?: ViewName;
-  themeMode?: ThemeMode;
-  environment?: DetectionSnapshot | null;
-  detectionError?: string | null;
-  installLogs?: Record<string, string>;
-  selectedSkillKeys?: string[];
-  skillBulkTargetId?: string;
-  skillQuery?: string;
-  skillClientFilter?: string;
-  skillStatusFilter?: string;
-  skillTagFilter?: string;
-  activeSkillGroupId?: string;
-  updateInfo?: AppUpdateCheckResult | null;
-  updateError?: string | null;
-  updateChecking?: boolean;
-};
-
-const navItems = [
-  ["客户端", "client", "clients"],
-  ["Skills 管理", "skills", "skills"],
-  ["WSL 管理", "wsl", "wsl"],
-  ["MCP 管理", "mcp", "mcp"],
-  ["Rules 管理", "rules", "rules"],
-  ["市场", "market", "market"],
-  ["设置", "settings", "settings"]
-] as const;
-
-const clients: Client[] = [
-  {
-    id: "claude",
-    name: "Claude Code",
-    type: "CLI 工具",
-    fallbackPath: "PATH: claude / ~/.claude.json",
-    description: "Anthropic Claude Code / Claude CLI，独立于 Claude Desktop",
-    iconFile: "/client-icons/claude.svg",
-    installUrl: "https://docs.anthropic.com/en/docs/claude-code/setup"
-  },
-  {
-    id: "claude-desktop",
-    name: "Claude Desktop",
-    type: "桌面应用",
-    fallbackPath: "%LOCALAPPDATA%\\Claude\\claude_desktop_config.json",
-    description: "Anthropic Claude Desktop，和 Claude Code/CLI 分开检测",
-    iconFile: "/client-icons/claude.svg",
-    installUrl: "https://claude.ai/download"
-  },
-  {
-    id: "codex",
-    name: "Codex",
-    type: "CLI 工具",
-    fallbackPath: "%USERPROFILE%\\.codex\\config.toml",
-    description: "OpenAI Codex CLI，读取 ~/.codex/config.toml 与 ~/.codex/skills",
-    iconFile: "/client-icons/openai.svg",
-    installUrl: "https://developers.openai.com/codex"
-  },
-  {
-    id: "gemini",
-    name: "Gemini CLI",
-    type: "CLI 工具",
-    fallbackPath: "%USERPROFILE%\\.gemini\\settings.json",
-    description: "Google Gemini CLI，读取 ~/.gemini/settings.json 与 ~/.gemini/skills",
-    iconFile: "/client-icons/gemini.svg",
-    installUrl: "https://github.com/google-gemini/gemini-cli"
-  },
-  {
-    id: "opencode",
-    name: "OpenCode",
-    type: "CLI 工具",
-    fallbackPath: "%USERPROFILE%\\.config\\opencode\\opencode.json",
-    description: "OpenCode CLI，本地 AI 编程 Agent",
-    iconFile: "/client-icons/opencode-logo-light.svg",
-    installUrl: "https://opencode.ai/"
-  },
-  {
-    id: "openclaw",
-    name: "OpenClaw",
-    type: "CLI 工具",
-    fallbackPath: "%USERPROFILE%\\.openclaw\\openclaw.json",
-    description: "OpenClaw Agent，读取 ~/.openclaw/openclaw.json 与 ~/.openclaw/skills",
-    iconFile: "/client-icons/claw.svg",
-    installUrl: "https://github.com/ShareAI-Lab/openclaw"
-  },
-  {
-    id: "hermes",
-    name: "Hermes",
-    type: "CLI 工具",
-    fallbackPath: "%USERPROFILE%\\.hermes\\config.yaml",
-    description: "Hermes Agent，读取 ~/.hermes/config.yaml 与 ~/.hermes/skills",
-    iconFile: "/client-icons/hermes.png",
-    installUrl: "https://github.com/Experience-Monks/hermes"
-  },
-  {
-    id: "cursor",
-    name: "Cursor",
-    type: "开发工具",
-    fallbackPath: "%LOCALAPPDATA%\\Programs\\Cursor\\Cursor.exe",
-    description: "面向开发者的 AI 代码编辑器",
-    iconFile: "/client-icons/cursor.svg",
-    installUrl: "https://cursor.com/downloads"
-  },
-  {
-    id: "vscode",
-    name: "VS Code",
-    type: "开发工具",
-    fallbackPath: "C:\\Program Files\\Microsoft VS Code\\Code.exe",
-    description: "Visual Studio Code 扩展集成",
-    iconFile: "/client-icons/vscode.svg",
-    installUrl: "https://code.visualstudio.com/download"
-  },
-  {
-    id: "trae",
-    name: "Trae",
-    type: "开发工具",
-    fallbackPath: "%LOCALAPPDATA%\\Programs\\Trae\\Trae.exe",
-    description: "Trae AI IDE，支持 MCP 与 Skills 扩展",
-    iconFile: "/client-icons/trae.png",
-    installUrl: "https://www.trae.ai/download"
-  }
-];
-
-const availableMcps = [
-  ["Database", "数据库查询与管理", "openai.svg", "slate"],
-  ["Brave Search", "Brave 搜索集成", "openrouter.svg", "slate"],
-  ["Time", "时间和时区操作", "gemini.svg", "slate"],
-  ["Memory", "持久化记忆存储", "anthropic.svg", "slate"]
-] as const;
-
-const marketSkills: MarketSkill[] = [
-  {
-    id: "trellis",
-    name: "Trellis",
-    description: "多 AI coding 平台的一站式规范、任务、Hook 与 Skill 工作流。",
-    category: "规划规范",
-    tone: "green",
-    rating: "5.0",
-    installs: "2.3k",
-    repo: "mindfold-ai/Trellis",
-    iconFile: "/skill-icons/trellis.svg",
-    supportedClients: ["claude", "codex", "cursor", "gemini", "opencode"],
-    methods: [
-      { id: "npm", label: "npm", detail: "npm install -g @mindfoldhq/trellis@latest", packageName: "@mindfoldhq/trellis@latest" },
-      { id: "pnpm", label: "pnpm", detail: "pnpm add -g @mindfoldhq/trellis@latest", packageName: "@mindfoldhq/trellis@latest" }
-    ]
-  },
-  {
-    id: "openspec",
-    name: "OpenSpec",
-    description: "轻量级 SDD 工作流，沉淀 proposal、spec、design 和 tasks。",
-    category: "规划规范",
-    tone: "purple",
-    rating: "5.0",
-    installs: "1.8k",
-    repo: "Fission-AI/OpenSpec",
-    iconFile: "github-openspec.svg",
-    supportedClients: ["claude", "codex", "cursor", "gemini"],
-    methods: [
-      { id: "npm", label: "npm", detail: "npm install -g @fission-ai/openspec@latest", packageName: "@fission-ai/openspec@latest" },
-      { id: "pnpm", label: "pnpm", detail: "pnpm add -g @fission-ai/openspec@latest", packageName: "@fission-ai/openspec@latest" }
-    ]
-  },
-  /* 市场暂时只保留前两个 Skill（Trellis / OpenSpec），其余先注释掉：
-  {
-    id: "grill-me",
-    supportedClients: ["claude", "codex", "cursor"],
-    name: "Grill Me",
-    description: "让 Agent 在动手前持续追问，压实需求、边界和风险。",
-    category: "生产力",
-    tone: "pink",
-    rating: "4.8",
-    installs: "3.1k",
-    repo: "mattpocock/skills",
-    iconFile: "github-mattpocock.png",
-    methods: [
-      { id: "npx", label: "npx", detail: "npx -y skills@latest add mattpocock/skills --skill grill-me --agent codex --global --yes", packageName: "skills@latest", args: ["add", "mattpocock/skills", "--skill", "grill-me", "--agent", "codex", "--global", "--yes"] }
-    ]
-  },
-  {
-    id: "grill-with-docs",
-    supportedClients: ["claude", "codex", "cursor"],
-    name: "Grill With Docs",
-    description: "需求拷问同时沉淀领域模型、术语、CONTEXT 和 ADR。",
-    category: "文档知识",
-    tone: "green",
-    rating: "4.7",
-    installs: "1.2k",
-    repo: "mattpocock/skills",
-    iconFile: "github-mattpocock.png",
-    methods: [{ id: "npx", label: "npx", detail: "npx -y skills@latest add mattpocock/skills --skill grill-with-docs --agent codex --global --yes", packageName: "skills@latest", args: ["add", "mattpocock/skills", "--skill", "grill-with-docs", "--agent", "codex", "--global", "--yes"] }]
-  },
-  {
-    id: "tdd",
-    supportedClients: ["claude", "codex", "cursor"],
-    name: "TDD",
-    description: "红绿重构循环，让功能修复以可验证纵向切片交付。",
-    category: "调试测试",
-    tone: "teal",
-    rating: "4.6",
-    installs: "856",
-    repo: "mattpocock/skills",
-    iconFile: "github-mattpocock.png",
-    methods: [{ id: "npx", label: "npx", detail: "npx -y skills@latest add mattpocock/skills --skill tdd --agent codex --global --yes", packageName: "skills@latest", args: ["add", "mattpocock/skills", "--skill", "tdd", "--agent", "codex", "--global", "--yes"] }]
-  },
-  {
-    id: "diagnosing-bugs",
-    supportedClients: ["claude", "codex", "cursor"],
-    name: "Diagnosing Bugs",
-    description: "复杂 Bug 的复现、最小化、假设、插桩和回归闭环。",
-    category: "调试测试",
-    tone: "red",
-    rating: "4.5",
-    installs: "1.5k",
-    repo: "mattpocock/skills",
-    iconFile: "github-mattpocock.png",
-    methods: [{ id: "npx", label: "npx", detail: "npx -y skills@latest add mattpocock/skills --skill diagnosing-bugs --agent codex --global --yes", packageName: "skills@latest", args: ["add", "mattpocock/skills", "--skill", "diagnosing-bugs", "--agent", "codex", "--global", "--yes"] }]
-  }
-  */
-];
-
-const marketMcps: MarketMcp[] = [
-  {
-    id: "filesystem",
-    name: "Filesystem",
-    description: "让 AI 安全地读写本地指定目录的文件（默认当前目录，可在配置中调整路径）。",
-    iconFile: "anthropic.svg",
-    tone: "blue",
-    transport: "stdio",
-    command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
-  },
-  {
-    id: "fetch",
-    name: "Fetch",
-    description: "抓取网页内容并转为 Markdown 供 AI 阅读。",
-    iconFile: "openai.svg",
-    tone: "cyan",
-    transport: "stdio",
-    command: "uvx",
-    args: ["mcp-server-fetch"]
-  }
-];
+import { navItems, clients, availableMcps, marketSkills, marketMcps } from "./catalog";
+import {
+  systemPrefersDark,
+  resolveTheme,
+  html,
+  iconPath,
+  img,
+  svgIcon,
+  skillKey,
+  epoch,
+  updateTimestamp
+} from "./dom";
 
 const themeStorageKey = "smrmanager-theme";
 const dismissedUpdateStorageKey = "smrmanager-update-dismissed-version";
@@ -648,49 +233,6 @@ function addWslDistroAsRoot(distro: WslDistro): void {
 }
 
 
-function systemPrefersDark(): boolean {
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
-}
-
-function resolveTheme(mode: ThemeMode): ThemeName {
-  if (mode === "system") return systemPrefersDark() ? "dark" : "light";
-  return mode;
-}
-
-function html(value: unknown): string {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function iconPath(file: string, folder: "vendor-icons" | "skill-icons"): string {
-  if (file.startsWith("/")) return file;
-  if (file.includes("/")) return `/${file.replace(/^\/+/, "")}`;
-  return `/${folder}/${file}`;
-}
-
-function img(file: string, alt: string, folder: "vendor-icons" | "skill-icons" = "vendor-icons"): string {
-  return `<img src="${html(iconPath(file, folder))}" alt="${html(alt)}" />`;
-}
-
-// 统一的描边 SVG 图标（替换难看的文本符号箭头）。
-function svgIcon(name: string, size = 16): string {
-  const paths: Record<string, string> = {
-    "chevron-down": `<path d="m6 9 6 6 6-6"/>`,
-    "chevron-left": `<path d="m15 18-6-6 6-6"/>`,
-    "chevron-right": `<path d="m9 18 6-6-6-6"/>`,
-    refresh: `<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>`,
-    search: `<circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/>`,
-    plus: `<path d="M12 5v14M5 12h14"/>`,
-    download: `<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>`,
-    more: `<circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>`
-  };
-  return `<svg class="svg-icon" xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] ?? ""}</svg>`;
-}
-
 function runtime(client: Client): RuntimeClient | undefined {
   return environment?.clients.find((item) => item.id === client.id);
 }
@@ -764,10 +306,6 @@ function skillByPath(path: string): RuntimeSkill | undefined {
   return environment?.skills.find((skill) => skill.path === path);
 }
 
-function skillKey(skill: RuntimeSkill): string {
-  return `${skill.clientId}::${skill.path}`;
-}
-
 function selectedPathsFromKeys(): string[] {
   const paths = new Set<string>();
   for (const skill of environment?.skills ?? []) {
@@ -806,19 +344,6 @@ function mcpTargetClients(): RuntimeClient[] {
   return installedClients()
     .filter((client) => mcpWritableClientIds.has(client.id))
     .sort((a, b) => (order.get(a.id) ?? 999) - (order.get(b.id) ?? 999));
-}
-
-function epoch(value?: string | null): string {
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? new Date(n * 1000).toLocaleString() : "—";
-}
-
-function updateTimestamp(value?: string | null): string {
-  if (!value) return "—";
-  const n = Number(value);
-  if (Number.isFinite(n) && n > 0) return new Date(n * 1000).toLocaleString();
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? new Date(parsed).toLocaleString() : value;
 }
 
 function isUpdateDismissed(): boolean {
