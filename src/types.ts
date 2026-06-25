@@ -198,13 +198,20 @@ export type SkillContextMenuState = {
   y: number;
 };
 
+export type RuleContextMenuState = {
+  path: string;
+  clientId: string;
+  x: number;
+  y: number;
+};
+
 export type ConfirmDialogState = {
   title: string;
   message: string;
   confirmLabel: string;
   cancelLabel: string;
   paths: string[];
-  kind?: "skills" | "client" | "group";
+  kind?: "skills" | "client" | "group" | "rules";
   clientId?: string;
   groupId?: string;
 };

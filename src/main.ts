@@ -35,6 +35,7 @@ import type {
   MarketInstallDialogState,
   McpInstallDialogState,
   SkillContextMenuState,
+  RuleContextMenuState,
   ConfirmDialogState,
   AppUpdateCheckResult,
   HotState
@@ -60,6 +61,7 @@ import {
   state,
   saveSkillGroups,
   saveScanRoots,
+  saveClientOrder,
   themeStorageKey,
   dismissedUpdateStorageKey
 } from "./state";
@@ -142,6 +144,24 @@ function extraRuntimeClients(): RuntimeClient[] {
   return (state.environment?.clients ?? []).filter((item) => item.source && item.source !== "windows");
 }
 
+// 按用户自定义顺序排列固定客户端；未在顺序表中的（新客户端）按 catalog 原序追加在后。
+function orderedBaseClients(): Client[] {
+  if (state.clientOrder.length === 0) return clients;
+  const remaining = new Map(clients.map((client) => [client.id, client]));
+  const ordered: Client[] = [];
+  for (const id of state.clientOrder) {
+    const client = remaining.get(id);
+    if (client) {
+      ordered.push(client);
+      remaining.delete(id);
+    }
+  }
+  for (const client of clients) {
+    if (remaining.has(client.id)) ordered.push(client);
+  }
+  return ordered;
+}
+
 function displayClients(): Client[] {
   const extra = extraRuntimeClients().map((rt): Client => {
     const baseId = rt.id.split("@")[0];
@@ -156,7 +176,7 @@ function displayClients(): Client[] {
       installUrl: rt.installUrl
     };
   });
-  return [...clients, ...extra];
+  return [...orderedBaseClients(), ...extra];
 }
 
 // WSL/扩展根来源的客户端 id 集合；判断某 skill 是否来自 WSL（只读保护用）。
@@ -885,11 +905,13 @@ function renderClientsList(): string {
       const rt = runtime(client);
       const installed = rt?.installed ?? false;
       const isWsl = rt?.source === "wsl";
+      const draggable = clients.some((base) => base.id === client.id);
       const badge = rt && rt.source && rt.source !== "windows"
         ? `<span class="client-source-badge ${isWsl ? "wsl" : "custom"}">${isWsl ? "WSL" : "扩展"}</span>`
         : "";
       return `
-        <button class="client-row ${index === state.activeClientIndex ? "is-selected" : ""} ${installed ? "is-installed" : "is-missing"}" data-client-index="${index}" type="button">
+        <button class="client-row ${index === state.activeClientIndex ? "is-selected" : ""} ${installed ? "is-installed" : "is-missing"}" data-client-index="${index}" data-client-id="${html(client.id)}" type="button" draggable="${draggable ? "true" : "false"}">
+          <span class="client-drag-handle ${draggable ? "" : "is-placeholder"}" aria-hidden="true">${draggable ? svgIcon("grip", 16) : ""}</span>
           <span class="avatar mini image">${img(client.iconFile, client.name)}</span>
           <span class="client-row-copy"><strong>${html(client.name)}${badge}</strong><small>${installed ? `${rt?.mcpCount ?? 0} MCP / ${rt?.skillsCount ?? 0} Skills` : "未安装"}</small></span>
           <span class="client-status-dot ${installed ? "installed" : "missing"}"></span>
@@ -1319,7 +1341,7 @@ function renderMcpView(): string {
 
 function renderRuleListRow(rule: RuntimeRule): string {
   return `
-    <article class="rule-list-row">
+    <article class="rule-list-row" data-rule-path="${html(rule.path)}" data-rule-client="${html(rule.clientId)}">
       <div class="skill-row-icon ${ruleTone(rule)}">${html(skillInitials(rule.name))}</div>
       <div class="skill-row-main">
         <div class="skill-row-title"><strong>${html(rule.name)}</strong><span class="rule-source-pill">${html(rule.kind)}</span></div>
@@ -2010,7 +2032,7 @@ function bindSkillContextMenuEvents(): void {
 }
 
 function refreshSkillContextMenu(): void {
-  document.querySelector(".skill-context-menu")?.remove();
+  document.querySelector(".skill-context-menu:not(.rule-context-menu)")?.remove();
   document.querySelectorAll(".is-context-target").forEach((el) => el.classList.remove("is-context-target"));
   const ctx = state.skillContextMenu;
   if (!ctx) return;
@@ -2024,6 +2046,7 @@ function refreshSkillContextMenu(): void {
 }
 
 function openSkillContextMenu(menu: SkillContextMenuState): void {
+  if (state.ruleContextMenu) closeRuleContextMenu();
   state.skillContextMenu = menu;
   refreshSkillContextMenu();
 }
@@ -2034,6 +2057,132 @@ function closeSkillContextMenu(): void {
   refreshSkillContextMenu();
 }
 
+// 可接收 Rule 的目标：已安装的 catalog 客户端（排除来源），复制时落到其 rules 目录。
+function ruleTargetClients(sourceClientId?: string): RuntimeClient[] {
+  const order = new Map(clients.map((client, index) => [client.id, index]));
+  return installedClients()
+    .filter((client) => order.has(client.id) && client.id !== sourceClientId)
+    .sort((a, b) => (order.get(a.id) ?? 999) - (order.get(b.id) ?? 999));
+}
+
+async function copyRuleToClient(rulePath: string, targetClientId: string): Promise<void> {
+  closeRuleContextMenu();
+  try {
+    const message = await invoke<string>("copy_rule_to_client", { rulePath, targetClientId });
+    setSkillActionMessage(message, 2600);
+    await loadEnvironment(true);
+  } catch (error) {
+    setSkillActionMessage(`复制失败：${error instanceof Error ? error.message : String(error)}`, 4200);
+  }
+}
+
+async function deleteRules(paths: string[]): Promise<void> {
+  const unique = [...new Set(paths)].filter(Boolean);
+  if (unique.length === 0) return;
+  try {
+    const result = await invoke<DeleteSkillsResult>("delete_rules", { paths: unique });
+    setSkillActionMessage(result.message, 2600);
+    await loadEnvironment(true);
+  } catch (error) {
+    setSkillActionMessage(`删除失败：${error instanceof Error ? error.message : String(error)}`, 4200);
+  }
+}
+
+function openDeleteRulesDialog(path: string, label?: string): void {
+  state.confirmDialog = {
+    title: "删除 Rule",
+    message: `确认删除 ${label ?? "该 Rule"}？会先移动到 SMRmanager 回收目录，便于恢复。`,
+    confirmLabel: "删除",
+    cancelLabel: "取消",
+    paths: [path],
+    kind: "rules"
+  };
+  state.ruleContextMenu = null;
+  renderApp(true);
+}
+
+function renderRuleContextMenu(): string {
+  const ctx = state.ruleContextMenu;
+  if (!ctx) return "";
+  const rule = state.environment?.rules.find((item) => item.path === ctx.path);
+  if (!rule) return "";
+  const targets = ruleTargetClients(ctx.clientId);
+  const left = Math.max(12, Math.min(ctx.x, window.innerWidth - 330));
+  const top = Math.max(12, Math.min(ctx.y, window.innerHeight - 430));
+  const targetRows = targets.length
+    ? targets
+        .map(
+          (target) => `
+            <div class="context-target-row">
+              <span><strong>${html(target.name)}</strong><small>${html(target.type)}</small></span>
+              <button class="rule-context-action" data-target-client-id="${html(target.id)}" type="button">复制</button>
+            </div>`
+        )
+        .join("")
+    : `<div class="context-empty">没有其他已安装客户端可复制。</div>`;
+  return `
+    <div class="skill-context-menu rule-context-menu" style="left:${left}px;top:${top}px" role="menu">
+      <div class="context-menu-title"><span>Rule 操作</span><strong>${html(rule.name)}</strong></div>
+      <button class="context-menu-line" id="rule-context-copy-path" data-copy-path="${html(rule.path)}" type="button">复制路径</button>
+      <button class="context-menu-line is-danger" id="rule-context-delete" data-rule-path="${html(rule.path)}" type="button">删除 Rule</button>
+      <div class="context-menu-divider"></div>
+      <div class="context-menu-caption">复制到已安装客户端</div>
+      <div class="context-target-list">${targetRows}</div>
+    </div>`;
+}
+
+function bindRuleContextMenuEvents(): void {
+  document.querySelectorAll<HTMLButtonElement>(".rule-context-action").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const ctx = state.ruleContextMenu;
+      if (!ctx) return;
+      void copyRuleToClient(ctx.path, button.dataset.targetClientId ?? "");
+    });
+  });
+  document.querySelector<HTMLButtonElement>("#rule-context-copy-path")?.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    const path = (event.currentTarget as HTMLButtonElement).dataset.copyPath ?? "";
+    closeRuleContextMenu();
+    try {
+      await navigator.clipboard.writeText(path);
+      setSkillActionMessage("已复制 Rule 路径", 1600);
+    } catch {
+      setSkillActionMessage(path, 5200);
+    }
+  });
+  document.querySelector<HTMLButtonElement>("#rule-context-delete")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const ctx = state.ruleContextMenu;
+    const rule = ctx ? state.environment?.rules.find((item) => item.path === ctx.path) : undefined;
+    const path = (event.currentTarget as HTMLButtonElement).dataset.rulePath ?? "";
+    if (!path) return;
+    openDeleteRulesDialog(path, rule?.name);
+  });
+}
+
+function refreshRuleContextMenu(): void {
+  document.querySelector(".rule-context-menu")?.remove();
+  const ctx = state.ruleContextMenu;
+  if (!ctx) return;
+  const shell = document.querySelector(".app-shell");
+  if (!shell) return;
+  shell.insertAdjacentHTML("beforeend", renderRuleContextMenu());
+  bindRuleContextMenuEvents();
+}
+
+function openRuleContextMenu(menu: RuleContextMenuState): void {
+  if (state.skillContextMenu) closeSkillContextMenu();
+  state.ruleContextMenu = menu;
+  refreshRuleContextMenu();
+}
+
+function closeRuleContextMenu(): void {
+  if (!state.ruleContextMenu) return;
+  state.ruleContextMenu = null;
+  refreshRuleContextMenu();
+}
+
 function renderApp(preserveScroll = false): void {
   const workspaceScrollTop = preserveScroll ? (document.querySelector<HTMLElement>(".workspace")?.scrollTop ?? 0) : 0;
   const clientTabScrollTop = preserveScroll ? (document.querySelector<HTMLElement>(".client-tab-scroll")?.scrollTop ?? 0) : 0;
@@ -2042,6 +2191,7 @@ function renderApp(preserveScroll = false): void {
   appRoot.innerHTML = `<div class="app-shell ${state.currentView === "market" ? "market-preview-shell" : ""}">${renderWindowControls()}${renderSidebar()}${renderContent()}${renderConfirmDialog()}${renderImportDialog()}${renderMarketInstallDialog()}${renderMcpInstallDialog()}${renderSkillGroupDialog()}${renderSkillLinkDialog()}${renderGitInstallDialog()}</div>`;
   bindInteractions();
   refreshSkillContextMenu();
+  refreshRuleContextMenu();
   if (preserveScroll) {
     const workspace = document.querySelector<HTMLElement>(".workspace");
     const clientTab = document.querySelector<HTMLElement>(".client-tab-scroll");
@@ -2060,6 +2210,50 @@ function bindInteractions(): void {
       state.activeClientIndex = Number(button.dataset.clientIndex ?? 0);
       state.activeClientTab = "skills";
       state.currentView = "clients";
+      renderApp(true);
+    });
+  });
+  document.querySelectorAll<HTMLElement>(".client-row[draggable='true']").forEach((row) => {
+    row.addEventListener("dragstart", (event) => {
+      row.classList.add("is-dragging");
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", row.dataset.clientId ?? "");
+      }
+    });
+    row.addEventListener("dragend", () => {
+      row.classList.remove("is-dragging");
+      document
+        .querySelectorAll(".client-row.is-drop-target")
+        .forEach((element) => element.classList.remove("is-drop-target"));
+    });
+    row.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      row.classList.add("is-drop-target");
+    });
+    row.addEventListener("dragleave", () => {
+      row.classList.remove("is-drop-target");
+    });
+    row.addEventListener("drop", (event) => {
+      event.preventDefault();
+      row.classList.remove("is-drop-target");
+      const sourceId = event.dataTransfer?.getData("text/plain") ?? "";
+      const targetId = row.dataset.clientId ?? "";
+      if (!sourceId || !targetId || sourceId === targetId) return;
+      const selectedId = displayClients()[state.activeClientIndex]?.id;
+      const order = orderedBaseClients().map((client) => client.id);
+      const from = order.indexOf(sourceId);
+      const to = order.indexOf(targetId);
+      if (from < 0 || to < 0) return;
+      order.splice(from, 1);
+      order.splice(to, 0, sourceId);
+      state.clientOrder = order;
+      saveClientOrder();
+      if (selectedId) {
+        const newIndex = displayClients().findIndex((client) => client.id === selectedId);
+        if (newIndex >= 0) state.activeClientIndex = newIndex;
+      }
       renderApp(true);
     });
   });
@@ -2097,6 +2291,8 @@ function bindInteractions(): void {
       void deleteClientConfig(dialog.clientId);
     } else if (dialog.kind === "group" && dialog.groupId) {
       deleteSkillGroup(dialog.groupId);
+    } else if (dialog.kind === "rules") {
+      void deleteRules(dialog.paths);
     } else {
       void deleteSkills(dialog.paths);
     }
@@ -2637,12 +2833,24 @@ function bindInteractions(): void {
       openSkillContextMenu({ key, path, x: event.clientX, y: event.clientY });
     });
   });
+  document.querySelectorAll<HTMLElement>(".rule-list-row[data-rule-path]").forEach((row) => {
+    row.addEventListener("contextmenu", (event) => {
+      const path = row.dataset.rulePath;
+      const clientId = row.dataset.ruleClient ?? "";
+      if (!path) return;
+      event.preventDefault();
+      openRuleContextMenu({ path, clientId, x: event.clientX, y: event.clientY });
+    });
+  });
   document.querySelector<HTMLElement>(".app-shell")?.addEventListener("click", (event) => {
     const target = event.target as Element | null;
     if (state.clientMenuOpen && !target?.closest(".client-menu-wrap")) {
       state.clientMenuOpen = false;
       renderApp();
       return;
+    }
+    if (state.ruleContextMenu && !target?.closest(".rule-context-menu")) {
+      closeRuleContextMenu();
     }
     if (!state.skillContextMenu) return;
     if (target?.closest(".skill-context-menu")) return;

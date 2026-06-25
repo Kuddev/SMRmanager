@@ -321,12 +321,53 @@
   display: flex;
   height: 58px;
   align-items: center;
-  gap: 12px;
-  padding: 0 12px;
+  gap: 10px;
+  padding: 0 12px 0 8px;
   border-radius: 10px;
   color: var(--text);
   background: transparent;
   text-align: left;
+}
+
+.client-drag-handle {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  color: var(--muted);
+  opacity: 0.32;
+  cursor: grab;
+  transition:
+    opacity 140ms ease,
+    color 140ms ease;
+}
+
+.client-row:hover .client-drag-handle {
+  opacity: 0.7;
+}
+
+.client-drag-handle:hover {
+  color: var(--primary);
+  opacity: 1;
+}
+
+.client-drag-handle:active {
+  cursor: grabbing;
+}
+
+.client-drag-handle.is-placeholder {
+  cursor: default;
+  opacity: 0;
+}
+
+.client-row.is-dragging {
+  opacity: 0.45;
+}
+
+.client-row.is-drop-target {
+  background: var(--primary-soft);
+  box-shadow: inset 0 0 0 2px var(--primary);
 }
 
 .client-row:hover,

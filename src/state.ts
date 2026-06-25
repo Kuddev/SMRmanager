@@ -13,6 +13,7 @@ import type {
   SkillGroupDialogState,
   DetectionSnapshot,
   SkillContextMenuState,
+  RuleContextMenuState,
   ConfirmDialogState,
   ImportSkillDialogState,
   MarketInstallDialogState,
@@ -26,6 +27,7 @@ export const themeStorageKey = "smrmanager-theme";
 export const dismissedUpdateStorageKey = "smrmanager-update-dismissed-version";
 const skillGroupsStorageKey = "smrmanager-skill-groups";
 const scanRootsStorageKey = "smrmanager-scan-roots";
+const clientOrderStorageKey = "smrmanager-client-order";
 
 export function readStoredThemeMode(): ThemeMode {
   const stored = localStorage.getItem(themeStorageKey);
@@ -82,6 +84,18 @@ export function loadScanRoots(): ScanRoot[] {
   }
 }
 
+export function loadClientOrder(): string[] {
+  try {
+    const raw = localStorage.getItem(clientOrderStorageKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string");
+  } catch {
+    return [];
+  }
+}
+
 export const hotState = import.meta.hot?.data as HotState | undefined;
 const hotView = hotState?.currentView as ViewName | "roles" | undefined;
 const initialThemeMode: ThemeMode = hotState?.themeMode ?? readStoredThemeMode();
@@ -101,6 +115,7 @@ export type AppState = {
   selectedSkillKeys: Set<string>;
   skillBulkTargetId: string;
   skillContextMenu: SkillContextMenuState | null;
+  ruleContextMenu: RuleContextMenuState | null;
   clientMenuOpen: boolean;
   confirmDialog: ConfirmDialogState | null;
   importSkillDialog: ImportSkillDialogState | null;
@@ -120,6 +135,7 @@ export type AppState = {
   activeSkillGroupId: string;
   skillGroups: SkillGroup[];
   scanRoots: ScanRoot[];
+  clientOrder: string[];
   wslDistros: WslDistro[];
   wslDetecting: boolean;
   wslDetectError: string | null;
@@ -157,6 +173,7 @@ export const state: AppState = {
   selectedSkillKeys: new Set<string>(hotState?.selectedSkillKeys ?? []),
   skillBulkTargetId: hotState?.skillBulkTargetId ?? "",
   skillContextMenu: null,
+  ruleContextMenu: null,
   clientMenuOpen: false,
   confirmDialog: null,
   importSkillDialog: null,
@@ -176,6 +193,7 @@ export const state: AppState = {
   activeSkillGroupId: hotState?.activeSkillGroupId ?? "",
   skillGroups: loadSkillGroups(),
   scanRoots: loadScanRoots(),
+  clientOrder: loadClientOrder(),
   wslDistros: [],
   wslDetecting: false,
   wslDetectError: null,
@@ -209,6 +227,14 @@ export function saveSkillGroups(): void {
 export function saveScanRoots(): void {
   try {
     localStorage.setItem(scanRootsStorageKey, JSON.stringify(state.scanRoots));
+  } catch {
+    // 持久化失败忽略。
+  }
+}
+
+export function saveClientOrder(): void {
+  try {
+    localStorage.setItem(clientOrderStorageKey, JSON.stringify(state.clientOrder));
   } catch {
     // 持久化失败忽略。
   }

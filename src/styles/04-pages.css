@@ -1265,6 +1265,15 @@
   background: rgba(88, 101, 242, 0.08);
 }
 
+.context-menu-line.is-danger {
+  color: #ef4444;
+}
+
+.context-menu-line.is-danger:hover {
+  border-color: rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.1);
+}
+
 .context-menu-divider {
   height: 1px;
   margin: 8px 4px;

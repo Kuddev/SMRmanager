@@ -13,6 +13,8 @@ pub fn run() {
             detection::wsl_start,
             detection::wsl_open_terminal,
             detection::delete_skills,
+            detection::copy_rule_to_client,
+            detection::delete_rules,
             detection::transfer_skills,
             detection::adopt_skills_to_library,
             detection::link_skill_to_clients,

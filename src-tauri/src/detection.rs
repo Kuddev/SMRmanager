@@ -1938,6 +1938,104 @@ pub fn delete_skills(paths: Vec<String>) -> Result<DeleteSkillsResult, String> {
     })
 }
 
+/// 客户端可写入 Rule 的目录：优先 rule_paths 中的目录型（无扩展名），否则取首个路径的父目录。
+fn client_rule_dir(client_id: &str) -> Option<PathBuf> {
+    let def = client_definitions().into_iter().find(|d| d.id == client_id)?;
+    def.rule_paths
+        .iter()
+        .find(|p| p.extension().is_none())
+        .cloned()
+        .or_else(|| {
+            def.rule_paths
+                .first()
+                .and_then(|p| p.parent().map(|parent| parent.to_path_buf()))
+        })
+}
+
+/// 把一个 Rule 文件复制到目标客户端的 rules 落点目录（同名自动加序号，绝不覆盖）。
+#[tauri::command(rename_all = "camelCase")]
+pub fn copy_rule_to_client(rule_path: String, target_client_id: String) -> Result<String, String> {
+    let src = PathBuf::from(&rule_path);
+    if !src.is_file() {
+        return Err("源 Rule 文件不存在".to_string());
+    }
+    let dir = client_rule_dir(&target_client_id)
+        .ok_or_else(|| "目标客户端没有可写入的 Rules 目录".to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建目标目录失败: {e}"))?;
+    let file_name = src
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "rule.md".to_string());
+    let mut dest = dir.join(&file_name);
+    let mut index = 1usize;
+    while dest.exists() {
+        let stem = src
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "rule".to_string());
+        let ext = src
+            .extension()
+            .map(|s| format!(".{}", s.to_string_lossy()))
+            .unwrap_or_default();
+        dest = dir.join(format!("{stem}-{index}{ext}"));
+        index += 1;
+    }
+    std::fs::copy(&src, &dest).map_err(|e| format!("复制失败: {e}"))?;
+    Ok(format!("已复制到 {}", path_to_string(&dest)))
+}
+
+/// 删除 Rule 文件：移动到 SMRmanager 回收目录（可恢复），不做真删除。
+#[tauri::command]
+pub fn delete_rules(paths: Vec<String>) -> Result<DeleteSkillsResult, String> {
+    let ts = UNIX_EPOCH
+        .elapsed()
+        .map(|duration| duration.as_secs().to_string())
+        .unwrap_or_else(|_| "0".to_string());
+    let trash_root = home_dir().join(".smrmanager").join("trash").join("rules");
+    std::fs::create_dir_all(&trash_root).ok();
+    let mut moved_to_trash = Vec::new();
+    let mut failed = Vec::new();
+    let mut deleted = 0usize;
+
+    for raw in paths {
+        let src = PathBuf::from(&raw);
+        if !src.is_file() {
+            failed.push(format!("{raw}：文件不存在"));
+            continue;
+        }
+        let name = src
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "rule".to_string());
+        let leaf = format!("{ts}-{}", safe_trash_name(&name));
+        let mut target = trash_root.join(&leaf);
+        let mut index = 1usize;
+        while target.exists() {
+            target = trash_root.join(format!("{leaf}-{index}"));
+            index += 1;
+        }
+        let result = std::fs::rename(&src, &target).or_else(|_| {
+            std::fs::copy(&src, &target)
+                .and_then(|_| std::fs::remove_file(&src))
+                .map(|_| ())
+        });
+        match result {
+            Ok(_) => {
+                deleted += 1;
+                moved_to_trash.push(path_to_string(&target));
+            }
+            Err(error) => failed.push(format!("{raw}：{error}")),
+        }
+    }
+
+    Ok(DeleteSkillsResult {
+        deleted,
+        moved_to_trash,
+        failed,
+        message: format!("已删除 {deleted} 个 Rule（已移动到 SMRmanager 回收目录）"),
+    })
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServerSpec {
