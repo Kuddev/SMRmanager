@@ -4,7 +4,7 @@
   <p>一站式管理多个 AI 编程客户端的 <b>Skills / MCP / Rules</b> 桌面工具</p>
   <p><sub>Tauri 2 · Vite · TypeScript · TailwindCSS</sub></p>
   <p>
-    <img src="https://img.shields.io/badge/platform-Windows_｜_macOS_｜_Linux-2b6cb0?style=for-the-badge" alt="platform" />
+    <img src="https://img.shields.io/badge/platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="platform" />
     <img src="https://img.shields.io/badge/Tauri-2-24C8DB?style=for-the-badge&logo=tauri&logoColor=white" alt="Tauri" />
     <img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
     <img src="https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" />
@@ -34,6 +34,8 @@ SMRmanager 会自动检测本机已安装的主流 AI 编程客户端（Claude C
   <img src="https://img.shields.io/badge/Hermes-6E56CF?style=flat-square" alt="Hermes" />
   <img src="https://img.shields.io/badge/Cursor-000000?style=flat-square" alt="Cursor" />
   <img src="https://img.shields.io/badge/VS_Code-007ACC?style=flat-square&logo=visualstudiocode&logoColor=white" alt="VS Code" />
+</p>
+<p>
   <img src="https://img.shields.io/badge/Trae-FF4A4A?style=flat-square" alt="Trae" />
   <img src="https://img.shields.io/badge/QoderWork_CN-FF6A00?style=flat-square" alt="QoderWork CN" />
   <img src="https://img.shields.io/badge/Z_Code-3859FF?style=flat-square" alt="Z Code" />
