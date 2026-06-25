@@ -1014,7 +1014,7 @@ function rulePreview(rule: RuntimeRule): string {
 
 function renderClientRuleRow(rule: RuntimeRule): string {
   return `
-    <article class="client-rule-row">
+    <article class="client-rule-row" data-rule-path="${html(rule.path)}" data-rule-client="${html(rule.clientId)}">
       <div class="skill-row-icon ${ruleTone(rule)}">${html(skillInitials(rule.name))}</div>
       <div class="client-skill-copy">
         <div class="skill-row-title"><strong>${html(rule.name)}</strong><span class="rule-source-pill">${html(rule.kind)}</span></div>
@@ -2789,7 +2789,7 @@ function bindInteractions(): void {
       openSkillContextMenu({ key, path, x: event.clientX, y: event.clientY });
     });
   });
-  document.querySelectorAll<HTMLElement>(".rule-list-row[data-rule-path]").forEach((row) => {
+  document.querySelectorAll<HTMLElement>(".rule-list-row[data-rule-path], .client-rule-row[data-rule-path]").forEach((row) => {
     row.addEventListener("contextmenu", (event) => {
       const path = row.dataset.rulePath;
       const clientId = row.dataset.ruleClient ?? "";
