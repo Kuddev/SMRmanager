@@ -1149,11 +1149,10 @@ async function loadWslInstances(): Promise<void> {
     state.wslDistros = await invoke<WslDistro[]>("list_wsl_distros");
     state.wslInstancesLoaded = true;
     if (state.wslDistros.length === 0) state.wslDetectError = "未检测到 WSL 发行版（需安装 WSL）";
-    if (!state.wslDistros.some((d) => d.distro === state.activeWslDistro)) {
-      const pick = state.wslDistros.find((d) => d.isDefault) ?? state.wslDistros.find((d) => d.running) ?? state.wslDistros[0];
-      state.activeWslDistro = pick?.distro ?? "";
+    if (state.activeWslDistro && !state.wslDistros.some((d) => d.distro === state.activeWslDistro)) {
+      state.activeWslDistro = "";
     }
-    ensureWslScanned();
+    if (state.activeWslDistro) ensureWslScanned();
   } catch (error) {
     state.wslDistros = [];
     state.wslInstancesLoaded = true;
@@ -1178,9 +1177,9 @@ function ensureWslScanned(): void {
 
 function selectWslDistro(name: string): void {
   state.activeWslDistro = name;
-  state.selectedWslSkillPath = "";
-  state.activeWslTab = "skills";
+  state.activeClientTab = "skills";
   ensureWslScanned();
+  state.wslActiveClientId = wslInstanceClients(name)[0]?.id ?? "";
   renderApp(true);
 }
 
@@ -1194,140 +1193,106 @@ async function wslControl(command: string, distro: string, okMsg: string): Promi
   }
 }
 
+// 某 WSL 实例内检测到的 CLI 客户端（id 形如 claude@wsl-Ubuntu）。
+function wslInstanceClients(distro: string): Client[] {
+  const suffix = `@${wslTag(distro)}`;
+  return displayClients().filter((client) => client.id.endsWith(suffix));
+}
+
+function backToWslInstances(): void {
+  state.activeWslDistro = "";
+  state.wslActiveClientId = "";
+  renderApp(true);
+}
+
 function renderWslView(): string {
   if (!state.wslInstancesLoaded && !state.wslDetecting) {
     void loadWslInstances();
   }
-  return `<main class="workspace"><div class="dashboard-grid">${renderWslInstanceList()}${renderWslMain()}${renderWslInspector()}</div></main>`;
+  // L1：未进入实例时显示虚拟机列表；L2：进入实例后按 CLI 客户端分类（复用主页客户端布局）。
+  if (!state.activeWslDistro) {
+    return `<main class="workspace single-column-workspace">${renderWslInstanceLanding()}</main>`;
+  }
+  return `<main class="workspace"><div class="dashboard-grid">${renderWslClientColumn()}${renderWslClientMain()}${renderWslClientInspector()}</div></main>`;
 }
 
-function renderWslInstanceList(): string {
-  const rows = state.wslDistros
+// L1：虚拟机（WSL 实例）落地页 —— 只列实例，点击进入，不直接显示 skill。
+function renderWslInstanceLanding(): string {
+  const cards = state.wslDistros
     .map((d) => {
-      const active = d.distro === state.activeWslDistro;
-      return `<button class="client-row ${active ? "is-selected" : ""}" data-wsl-distro="${html(d.distro)}" type="button">
-        <span class="wsl-status-dot ${d.running ? "running" : "stopped"}"></span>
-        <span class="client-row-copy"><strong>${html(d.distro)}${d.isDefault ? `<span class="wsl-default-tag">默认</span>` : ""}</strong><small>${d.running ? "运行中" : "已停止"}</small></span>
+      const clientCount = wslInstanceClients(d.distro).length;
+      return `<button class="wsl-instance-card" data-wsl-distro="${html(d.distro)}" type="button">
+        <span class="wsl-instance-icon">🐧</span>
+        <div class="wsl-instance-meta">
+          <strong>${html(d.distro)}${d.isDefault ? `<span class="wsl-default-tag">默认</span>` : ""}</strong>
+          <small><span class="wsl-status-dot ${d.running ? "running" : "stopped"}"></span>${d.running ? "运行中" : "已停止"}${clientCount ? ` · ${clientCount} 个 CLI` : ""}</small>
+        </div>
+        <span class="wsl-enter-arrow">${svgIcon("chevron-right", 18)}</span>
+      </button>`;
+    })
+    .join("");
+  return `<section class="client-main-card management-card">
+    <div class="skills-page-hero">
+      <div class="hero-left"><span class="avatar large wsl-avatar">🐧</span><div><h2>WSL 管理</h2><p>选择一个虚拟机进入，按 CLI 客户端分类管理其中的 Skills / MCP / Rules。</p></div></div>
+      <div class="skills-hero-actions"><button id="refresh-wsl" class="secondary-button" type="button">${state.wslDetecting ? "检测中..." : "刷新实例"}</button></div>
+    </div>
+    ${state.wslDetectError ? `<div class="status-banner danger">${html(state.wslDetectError)}</div>` : ""}
+    <div class="wsl-instance-grid">${cards || `<div class="empty-config-panel">${state.wslDetecting ? "检测中..." : "未检测到 WSL 发行版（需安装 WSL）"}</div>`}</div>
+  </section>`;
+}
+
+// L2 左栏：进入的实例 + 其 CLI 客户端列表（点击选中，复用主页 client-row 样式）。
+function renderWslClientColumn(): string {
+  const distro = state.activeWslDistro;
+  const inst = state.wslDistros.find((d) => d.distro === distro);
+  const list = wslInstanceClients(distro);
+  if (!list.some((client) => client.id === state.wslActiveClientId)) {
+    state.wslActiveClientId = list[0]?.id ?? "";
+  }
+  const running = inst?.running ?? false;
+  const rows = list
+    .map((client) => {
+      const rt = runtime(client);
+      const installed = rt?.installed ?? false;
+      const active = client.id === state.wslActiveClientId;
+      return `<button class="client-row ${active ? "is-selected" : ""} ${installed ? "is-installed" : "is-missing"}" data-wsl-client="${html(client.id)}" type="button">
+        <span class="avatar mini image">${img(client.iconFile, client.name)}</span>
+        <span class="client-row-copy"><strong>${html(client.name)}</strong><small>${installed ? `${rt?.mcpCount ?? 0} MCP / ${rt?.skillsCount ?? 0} Skills` : "未检测"}</small></span>
+        <span class="client-status-dot ${installed ? "installed" : "missing"}"></span>
       </button>`;
     })
     .join("");
   return `<section class="client-list-card">
-    <div class="list-heading"><strong>WSL 实例</strong><span>${state.wslDistros.length}</span></div>
-    ${state.wslDetectError ? `<div class="status-banner danger">${html(state.wslDetectError)}</div>` : ""}
-    <div class="client-list">${rows || `<div class="empty-config-panel">${state.wslDetecting ? "检测中..." : "未检测到 WSL 发行版"}</div>`}</div>
-    <button id="refresh-wsl" class="text-action" type="button"><span>${svgIcon("refresh", 15)}</span>${state.wslDetecting ? "检测中..." : "刷新实例"}</button>
-    <a class="wsl-help-link" href="https://learn.microsoft.com/windows/wsl/" target="_blank" rel="noreferrer">如何管理 WSL 实例?</a>
+    <button class="wsl-back-button" data-wsl-back="1" type="button">${svgIcon("chevron-left", 15)}<span>全部实例</span></button>
+    <div class="list-heading wsl-instance-heading"><strong>🐧 ${html(distro)}</strong><span class="wsl-status-dot ${running ? "running" : "stopped"}"></span></div>
+    <div class="wsl-instance-controls">
+      ${running
+        ? `<button class="ghost-mini-button" data-wsl-stop="${html(distro)}" type="button">停止</button>`
+        : `<button class="ghost-mini-button" data-wsl-start="${html(distro)}" type="button">启动</button>`}
+      <button class="ghost-mini-button" data-wsl-terminal="${html(distro)}" type="button">终端</button>
+      <button class="ghost-mini-button" data-wsl-default="${html(distro)}" type="button" ${inst?.isDefault ? "disabled" : ""}>${inst?.isDefault ? "默认" : "设默认"}</button>
+    </div>
+    <div class="client-list">${rows || `<div class="empty-config-panel">${running ? "该实例未检测到 CLI 客户端。" : "实例未运行，启动后才能读取内容。"}</div>`}</div>
+    <button id="refresh-detection" class="text-action" type="button"><span>${svgIcon("refresh", 15)}</span>重新检测</button>
   </section>`;
 }
 
-function renderWslMain(): string {
-  const inst = state.wslDistros.find((d) => d.distro === state.activeWslDistro);
-  if (!inst) {
-    return `<section class="client-main-card"><div class="empty-config-panel">请选择左侧的 WSL 实例。</div></section>`;
+// L2 中栏：选中 CLI 客户端的详情，直接复用主页 renderClientMain。
+function renderWslClientMain(): string {
+  const client = wslInstanceClients(state.activeWslDistro).find((c) => c.id === state.wslActiveClientId);
+  if (!client) {
+    return `<section class="client-main-card"><div class="client-hero"><div class="hero-left"><span class="avatar large wsl-avatar">🐧</span><div><h2>${html(state.activeWslDistro)}</h2></div></div></div><div class="empty-config-panel">该实例暂无可管理的 CLI 客户端，或尚未启动。</div></section>`;
   }
-  const skills = wslInstanceSkills(inst.distro);
-  const mcps = wslInstanceMcps(inst.distro);
-  const rules = wslInstanceRules(inst.distro);
-  const tab = (id: string, label: string, count?: number) =>
-    `<button class="tab ${state.activeWslTab === id ? "is-active" : ""}" data-wsl-tab="${id}" type="button">${label}${count !== undefined ? `<span>${count}</span>` : ""}</button>`;
-
-  let content = "";
-  if (!inst.running) {
-    content = `<div class="install-required inline"><div class="install-required-icon">!</div><div><h3>该发行版未运行</h3><p>启动后才能读取其中的 Skills / MCP / Rules。</p><button class="primary-button" data-wsl-start="${html(inst.distro)}" type="button">启动 ${html(inst.distro)}</button></div></div>`;
-  } else if (state.activeWslTab === "skills") {
-    content = `<div class="skill-list-table">${
-      skills.length
-        ? skills
-            .map(
-              (s) => `<article class="skill-list-row wsl-skill-row ${state.selectedWslSkillPath === s.path ? "is-selected" : ""}" data-wsl-skill-path="${html(s.path)}">
-        <div class="skill-row-icon ${skillTone(s)}">${html(skillInitials(s.name))}</div>
-        <div class="skill-row-main">
-          <div class="skill-row-title"><strong>${html(s.name)}</strong></div>
-          <p>${html(skillDescription(s))}</p>
-          <div class="skill-chip-row">${skillTags(s).map((t) => `<span>${html(t)}</span>`).join("")}</div>
-          <code>${html(s.path)}</code>
-        </div>
-        <div class="skill-row-meta updated"><span>更新时间</span><strong>${formatUpdated(s.updatedAt)}</strong></div>
-        <span class="status-pill is-on" title="即将支持启用/禁用">已检测</span>
-      </article>`
-            )
-            .join("")
-        : `<div class="empty-config-panel">该实例未检测到 Skills。</div>`
-    }</div>`;
-  } else if (state.activeWslTab === "mcp") {
-    content = `<div class="tool-stack">${mcps.length ? mcps.map(renderDetectedMcp).join("") : `<div class="empty-config-panel">该实例未检测到 MCP。</div>`}</div>`;
-  } else if (state.activeWslTab === "rules") {
-    content = `<div class="rule-list-table">${rules.length ? rules.map(renderRuleListRow).join("") : `<div class="empty-config-panel">该实例未检测到 Rules。</div>`}</div>`;
-  } else if (state.activeWslTab === "settings") {
-    content = `<div class="info-card"><dl>
-      <dt>发行版</dt><dd>${html(inst.distro)}</dd>
-      <dt>用户</dt><dd>${html(inst.user || "—")}</dd>
-      <dt>家目录</dt><dd><code>${html(inst.homeUnc || "—")}</code></dd>
-      <dt>状态</dt><dd>${inst.running ? "运行中" : "已停止"}${inst.isDefault ? " · 默认" : ""}</dd>
-    </dl></div>`;
-  } else {
-    content = `<div class="skills-stat-grid">
-      <article><strong>Skills</strong><b>${skills.length}</b><span>该实例</span><i>✦</i></article>
-      <article><strong>MCP</strong><b>${mcps.length}</b><span>该实例</span><i>◎</i></article>
-      <article><strong>Rules</strong><b>${rules.length}</b><span>该实例</span><i>♙</i></article>
-      <article><strong>状态</strong><b>${inst.running ? "运行" : "停止"}</b><span>${inst.isDefault ? "默认实例" : "非默认"}</span><i>🐧</i></article>
-    </div>`;
-  }
-
-  return `<section class="client-main-card">
-    <div class="client-hero">
-      <div class="hero-left"><span class="avatar large wsl-avatar">🐧</span><div><h2>${html(inst.distro)}</h2><small class="wsl-sub">${inst.running ? "运行中" : "已停止"}${inst.isDefault ? " · 默认" : ""}</small></div></div>
-      <div class="hero-actions">
-        <button class="secondary-button" data-wsl-terminal="${html(inst.distro)}" type="button">⎘ 在终端中打开</button>
-        <div class="client-menu-wrap"><button id="wsl-actions-toggle" class="ghost-dots ${state.clientMenuOpen ? "is-open" : ""}" type="button">${svgIcon("more", 18)}</button>${
-          state.clientMenuOpen
-            ? `<div class="client-menu" role="menu">
-          <button class="client-menu-item" data-wsl-default="${html(inst.distro)}" type="button" ${inst.isDefault ? "disabled" : ""}>设为默认</button>
-          ${inst.running ? `<button class="client-menu-item" data-wsl-stop="${html(inst.distro)}" type="button">停止</button>` : `<button class="client-menu-item" data-wsl-start="${html(inst.distro)}" type="button">启动</button>`}
-        </div>`
-            : ""
-        }</div>
-      </div>
-    </div>
-    <div class="tabs">
-      ${tab("overview", "概览")}
-      ${tab("skills", "Skills", skills.length)}
-      ${tab("mcp", "MCP", mcps.length)}
-      ${tab("rules", "Rules", rules.length)}
-      ${tab("settings", "设置")}
-    </div>
-    <div class="client-tab-scroll">${content}</div>
-  </section>`;
+  return renderClientMain(client);
 }
 
-function renderWslInspector(): string {
-  const skill = state.selectedWslSkillPath ? (state.environment?.skills ?? []).find((s) => s.path === state.selectedWslSkillPath) : undefined;
-  if (!skill) {
-    return `<aside class="inspector"><section class="info-card"><h3>Skill 信息</h3><p class="placeholder-copy">在中间列选择一个 Skill 查看详情。</p></section></aside>`;
+// L2 右栏：复用主页 renderInspector。
+function renderWslClientInspector(): string {
+  const client = wslInstanceClients(state.activeWslDistro).find((c) => c.id === state.wslActiveClientId);
+  if (!client) {
+    return `<aside class="inspector"><section class="info-card"><h3>客户端信息</h3><p class="placeholder-copy">选择左侧的 CLI 客户端查看详情。</p></section></aside>`;
   }
-  const baseName = clientNameById(skill.clientId.split("@")[0]);
-  return `<aside class="inspector">
-    <section class="info-card">
-      <h3>Skill 信息</h3>
-      <div class="wsl-skill-detail-head"><div class="skill-row-icon ${skillTone(skill)}">${html(skillInitials(skill.name))}</div><div><strong>${html(skill.name)}</strong></div></div>
-      <dl>
-        <dt>类型</dt><dd>${html(baseName)} Skill</dd>
-        <dt>分类标签</dt><dd>${(skill.tags ?? []).map((t) => `<span class="skill-linked-chip">${html(t)}</span>`).join(" ") || "—"}</dd>
-        <dt>描述</dt><dd>${html(skillDescription(skill))}</dd>
-        <dt>安装路径</dt><dd><code>${html(skill.path)}</code></dd>
-        <dt>最后更新</dt><dd>${formatUpdated(skill.updatedAt)}</dd>
-      </dl>
-    </section>
-    <section class="info-card compact">
-      <h3>操作</h3>
-      <div class="wsl-skill-actions">
-        <button class="ghost-mini-button" type="button" disabled title="即将支持">配置</button>
-        <button class="ghost-mini-button" type="button" disabled title="即将支持">禁用</button>
-        <button class="danger-mini-button" type="button" disabled title="即将支持">卸载</button>
-      </div>
-      <p class="placeholder-copy">启用/禁用、配置、卸载将在后续 WSL 专项支持。</p>
-    </section>
-  </aside>`;
+  return renderInspector(client);
 }
 
 function renderMcpView(): string {
@@ -2305,6 +2270,16 @@ function bindInteractions(): void {
   // —— WSL 页事件 ——
   document.querySelectorAll<HTMLButtonElement>("[data-wsl-distro]").forEach((button) => {
     button.addEventListener("click", () => selectWslDistro(button.dataset.wslDistro ?? ""));
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-wsl-back]").forEach((button) => {
+    button.addEventListener("click", () => backToWslInstances());
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-wsl-client]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.wslActiveClientId = button.dataset.wslClient ?? "";
+      state.activeClientTab = "skills";
+      renderApp(true);
+    });
   });
   document.querySelector<HTMLButtonElement>("#refresh-wsl")?.addEventListener("click", () => void loadWslInstances());
   document.querySelectorAll<HTMLButtonElement>("[data-wsl-tab]").forEach((button) => {

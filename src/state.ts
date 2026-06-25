@@ -142,6 +142,7 @@ export type AppState = {
   activeWslDistro: string;
   activeWslTab: "overview" | "skills" | "mcp" | "rules" | "settings";
   selectedWslSkillPath: string;
+  wslActiveClientId: string;
   wslInstancesLoaded: boolean;
   skillGroupDialog: SkillGroupDialogState | null;
   skillLinkDialog: { skillPath: string; skillName: string } | null;
@@ -200,6 +201,7 @@ export const state: AppState = {
   activeWslDistro: "",
   activeWslTab: "skills",
   selectedWslSkillPath: "",
+  wslActiveClientId: "",
   wslInstancesLoaded: false,
   skillGroupDialog: null,
   skillLinkDialog: null,

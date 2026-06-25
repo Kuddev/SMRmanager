@@ -1274,6 +1274,102 @@
   background: rgba(239, 68, 68, 0.1);
 }
 
+/* WSL 两级导航：L1 实例卡片 + L2 返回/控制条 */
+.wsl-instance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.wsl-instance-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.wsl-instance-card:hover {
+  border-color: rgba(88, 101, 242, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+}
+
+.wsl-instance-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  font-size: 22px;
+  background: var(--control-bg);
+}
+
+.wsl-instance-meta {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.wsl-instance-meta strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wsl-instance-meta small {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wsl-enter-arrow {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.wsl-back-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--primary);
+  background: transparent;
+  font-weight: 800;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.wsl-back-button:hover {
+  background: var(--primary-soft);
+}
+
+.wsl-instance-heading {
+  align-items: center;
+}
+
+.wsl-instance-controls {
+  display: flex;
+  gap: 6px;
+  padding: 0 8px 10px;
+}
+
 .context-menu-divider {
   height: 1px;
   margin: 8px 4px;
