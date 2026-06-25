@@ -241,7 +241,8 @@
 .dashboard-grid {
   display: grid;
   min-height: 0;
-  grid-template-columns: 220px minmax(460px, 1fr) 306px;
+  grid-template-columns: 264px minmax(440px, 1fr) 306px;
+  grid-template-rows: minmax(0, 1fr);
   gap: 12px;
   overflow: hidden;
 }
@@ -258,6 +259,7 @@
 .client-list-card {
   display: flex;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
   padding: 18px 10px;
   border-radius: 12px;
@@ -284,7 +286,34 @@
 
 .client-list {
   display: grid;
+  flex: 1;
+  min-height: 0;
+  align-content: start;
   gap: 8px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.client-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.client-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.client-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--line-strong);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+.client-list::-webkit-scrollbar-thumb:hover {
+  background: var(--primary);
+  background-clip: padding-box;
 }
 
 .client-row {

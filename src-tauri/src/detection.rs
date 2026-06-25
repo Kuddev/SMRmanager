@@ -365,7 +365,7 @@ fn build_definitions(home: &Path) -> Vec<ClientDefinition> {
             product: "OpenClaw",
             kind: "CLI 工具",
             description: "OpenClaw Agent，使用 ~/.openclaw/openclaw.json 与 ~/.openclaw/skills",
-            install_url: "https://github.com/ShareAI-Lab/openclaw",
+            install_url: "https://github.com/openclaw/openclaw",
             exe_names: &["openclaw", "claw"],
             exe_candidates: vec![],
             config_candidates: vec![home.join(".openclaw").join("openclaw.json")],
@@ -384,7 +384,7 @@ fn build_definitions(home: &Path) -> Vec<ClientDefinition> {
             product: "Hermes",
             kind: "CLI 工具",
             description: "Hermes Agent，使用 ~/.hermes/config.yaml 与 ~/.hermes/skills",
-            install_url: "https://github.com/Experience-Monks/hermes",
+            install_url: "https://github.com/NousResearch/hermes-agent",
             exe_names: &["hermes"],
             exe_candidates: vec![],
             config_candidates: vec![home.join(".hermes").join("config.yaml")],
@@ -439,6 +439,60 @@ fn build_definitions(home: &Path) -> Vec<ClientDefinition> {
             ],
             skill_dirs: vec![home.join(".trae").join("skills")],
             rule_paths: vec![home.join(".trae").join("AGENTS.md"), home.join(".trae").join("rules")],
+            source: "windows".into(),
+            root_label: None,
+        },
+        // 以下为「纯 rules」客户端（无 exe/config，靠 rule_paths 存在即判定检测到）。
+        ClientDefinition {
+            id: "qoderworkcn".into(),
+            name: "QoderWork CN".into(),
+            product: "QoderWork",
+            kind: "AI 工作台",
+            description: "阿里 QoderWork 国内版 AI 桌面助手，管理 ~/.qoderworkcn/awareness/main 下的 AGENTS/SOUL/USER",
+            install_url: "https://qoder.com.cn/qoderwork",
+            exe_names: &[],
+            exe_candidates: vec![],
+            config_candidates: vec![],
+            skill_dirs: vec![],
+            rule_paths: vec![
+                home.join(".qoderworkcn").join("awareness").join("main").join("AGENTS.md"),
+                home.join(".qoderworkcn").join("awareness").join("main").join("SOUL.md"),
+                home.join(".qoderworkcn").join("awareness").join("main").join("USER.md"),
+            ],
+            source: "windows".into(),
+            root_label: None,
+        },
+        ClientDefinition {
+            id: "zcode".into(),
+            name: "Z Code".into(),
+            product: "Z Code",
+            kind: "AI 代码编辑器",
+            description: "智谱 Z Code 轻量级 AI 代码编辑器，管理 ~/.zcode/AGENTS.md",
+            install_url: "https://zcode-ai.com",
+            exe_names: &["zcode"],
+            exe_candidates: vec![],
+            config_candidates: vec![],
+            skill_dirs: vec![],
+            rule_paths: vec![home.join(".zcode").join("AGENTS.md")],
+            source: "windows".into(),
+            root_label: None,
+        },
+        ClientDefinition {
+            id: "workbuddy".into(),
+            name: "WorkBuddy".into(),
+            product: "WorkBuddy",
+            kind: "AI 工作台",
+            description: "腾讯 CodeBuddy 旗下 WorkBuddy AI Agent 工作台，管理 ~/.workbuddy 下的 IDENTITY/SOUL/USER",
+            install_url: "https://www.codebuddy.cn/work/",
+            exe_names: &[],
+            exe_candidates: vec![],
+            config_candidates: vec![],
+            skill_dirs: vec![],
+            rule_paths: vec![
+                home.join(".workbuddy").join("IDENTITY.md"),
+                home.join(".workbuddy").join("SOUL.md"),
+                home.join(".workbuddy").join("USER.md"),
+            ],
             source: "windows".into(),
             root_label: None,
         },
@@ -1010,7 +1064,10 @@ fn rule_kind(path: &Path, managed: bool) -> String {
     }
 
     let source = rule_source(path).to_ascii_lowercase();
-    if matches!(source.as_str(), "agents.md" | "claude.md" | "gemini.md" | "soul.md") {
+    if matches!(
+        source.as_str(),
+        "agents.md" | "claude.md" | "gemini.md" | "soul.md" | "user.md" | "identity.md"
+    ) {
         "系统提示词".to_string()
     } else if path
         .extension()
@@ -2197,6 +2254,26 @@ fn now_secs_string() -> String {
 /// 在系统资源管理器/默认程序中打开文件或目录（复用 Shell start，无需额外插件）。
 #[tauri::command]
 pub fn open_path(target: String) -> Result<(), String> {
+    // http(s) 链接交给系统默认浏览器打开（「前往安装」跳转官网用）；其余按本地路径处理。
+    let lower = target.to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        #[cfg(windows)]
+        {
+            Command::new("cmd")
+                .args(["/C", "start", "", &target])
+                .spawn()
+                .map_err(|e| format!("打开链接失败: {e}"))?;
+        }
+        #[cfg(not(windows))]
+        {
+            Command::new("xdg-open")
+                .arg(&target)
+                .spawn()
+                .map_err(|e| format!("打开链接失败: {e}"))?;
+        }
+        return Ok(());
+    }
+
     let path = PathBuf::from(&target);
     if !path.exists() {
         return Err(format!("路径不存在: {target}"));

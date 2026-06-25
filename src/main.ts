@@ -932,7 +932,7 @@ function renderInstallRequired(client: Client, rt?: RuntimeClient): string {
         <h3>需要先安装 ${html(client.name)}</h3>
         <p>未检测到客户端，因此不会显示 MCP 插件和 Skills 配置。安装客户端后点击“重新检测”即可加载对应内容。</p>
         <div class="path-list">${paths.map((path) => `<code>${html(path)}</code>`).join("")}</div>
-        <a class="external-install-link" href="${html(rt?.installUrl ?? client.installUrl)}" target="_blank" rel="noreferrer">前往安装</a>
+        <button class="external-install-link" data-open-path="${html(rt?.installUrl ?? client.installUrl)}" type="button">前往安装</button>
       </div>
     </div>`;
 }
@@ -2037,6 +2037,7 @@ function closeSkillContextMenu(): void {
 function renderApp(preserveScroll = false): void {
   const workspaceScrollTop = preserveScroll ? (document.querySelector<HTMLElement>(".workspace")?.scrollTop ?? 0) : 0;
   const clientTabScrollTop = preserveScroll ? (document.querySelector<HTMLElement>(".client-tab-scroll")?.scrollTop ?? 0) : 0;
+  const clientListScrollTop = preserveScroll ? (document.querySelector<HTMLElement>(".client-list")?.scrollTop ?? 0) : 0;
   applyThemeToDocument();
   appRoot.innerHTML = `<div class="app-shell ${state.currentView === "market" ? "market-preview-shell" : ""}">${renderWindowControls()}${renderSidebar()}${renderContent()}${renderConfirmDialog()}${renderImportDialog()}${renderMarketInstallDialog()}${renderMcpInstallDialog()}${renderSkillGroupDialog()}${renderSkillLinkDialog()}${renderGitInstallDialog()}</div>`;
   bindInteractions();
@@ -2044,8 +2045,10 @@ function renderApp(preserveScroll = false): void {
   if (preserveScroll) {
     const workspace = document.querySelector<HTMLElement>(".workspace");
     const clientTab = document.querySelector<HTMLElement>(".client-tab-scroll");
+    const clientList = document.querySelector<HTMLElement>(".client-list");
     if (workspace) workspace.scrollTop = workspaceScrollTop;
     if (clientTab) clientTab.scrollTop = clientTabScrollTop;
+    if (clientList) clientList.scrollTop = clientListScrollTop;
   }
 }
 
@@ -2057,7 +2060,7 @@ function bindInteractions(): void {
       state.activeClientIndex = Number(button.dataset.clientIndex ?? 0);
       state.activeClientTab = "skills";
       state.currentView = "clients";
-      renderApp();
+      renderApp(true);
     });
   });
   document.querySelectorAll<HTMLButtonElement>(".nav-item").forEach((button) => {
@@ -2399,7 +2402,7 @@ function bindInteractions(): void {
   });
   document.querySelector<HTMLButtonElement>("#disable-all-mcp")?.addEventListener("click", () => void setAllMcpEnabled(false));
   document.querySelector<HTMLButtonElement>("#enable-all-mcp")?.addEventListener("click", () => void setAllMcpEnabled(true));
-  document.querySelectorAll<HTMLButtonElement>(".square-button[data-open-path]").forEach((button) => {
+  document.querySelectorAll<HTMLElement>("[data-open-path]").forEach((button) => {
     button.addEventListener("click", async () => {
       const target = button.dataset.openPath;
       if (!target) return;

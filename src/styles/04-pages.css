@@ -215,10 +215,28 @@
   text-decoration: none;
 }
 
+.external-install-link {
+  transition:
+    color 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
 .external-install-link:hover,
 .secondary-button:hover {
   border-color: rgba(88, 101, 242, 0.38);
   background: var(--panel-strong);
+}
+
+/* 「前往安装」单独强化反馈：悬停时主色实心填充 + 白字，避免只有边框微变。 */
+.external-install-link:hover {
+  border-color: var(--primary);
+  color: #ffffff;
+  background: var(--primary);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(79, 70, 229, 0.28);
 }
 
 .empty-config-panel {

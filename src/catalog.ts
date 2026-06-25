@@ -64,7 +64,7 @@ export const clients: Client[] = [
     fallbackPath: "%USERPROFILE%\\.openclaw\\openclaw.json",
     description: "OpenClaw Agent，读取 ~/.openclaw/openclaw.json 与 ~/.openclaw/skills",
     iconFile: "/client-icons/claw.svg",
-    installUrl: "https://github.com/ShareAI-Lab/openclaw"
+    installUrl: "https://github.com/openclaw/openclaw"
   },
   {
     id: "hermes",
@@ -73,7 +73,7 @@ export const clients: Client[] = [
     fallbackPath: "%USERPROFILE%\\.hermes\\config.yaml",
     description: "Hermes Agent，读取 ~/.hermes/config.yaml 与 ~/.hermes/skills",
     iconFile: "/client-icons/hermes.png",
-    installUrl: "https://github.com/Experience-Monks/hermes"
+    installUrl: "https://github.com/NousResearch/hermes-agent"
   },
   {
     id: "cursor",
@@ -101,6 +101,33 @@ export const clients: Client[] = [
     description: "Trae AI IDE，支持 MCP 与 Skills 扩展",
     iconFile: "/client-icons/trae.png",
     installUrl: "https://www.trae.ai/download"
+  },
+  {
+    id: "qoderworkcn",
+    name: "QoderWork CN",
+    type: "AI 工作台",
+    fallbackPath: "%USERPROFILE%\\.qoderworkcn\\awareness\\main",
+    description: "阿里 QoderWork 国内版，管理 ~/.qoderworkcn/awareness/main 下的 AGENTS/SOUL/USER",
+    iconFile: "/client-icons/qoderwork.svg",
+    installUrl: "https://qoder.com.cn/qoderwork"
+  },
+  {
+    id: "zcode",
+    name: "Z Code",
+    type: "AI 代码编辑器",
+    fallbackPath: "%USERPROFILE%\\.zcode\\AGENTS.md",
+    description: "智谱 Z Code 轻量级 AI 代码编辑器，管理 ~/.zcode/AGENTS.md",
+    iconFile: "/client-icons/zcode.svg",
+    installUrl: "https://zcode-ai.com"
+  },
+  {
+    id: "workbuddy",
+    name: "WorkBuddy",
+    type: "AI 工作台",
+    fallbackPath: "%USERPROFILE%\\.workbuddy",
+    description: "腾讯 CodeBuddy 旗下 WorkBuddy，管理 ~/.workbuddy 下的 IDENTITY/SOUL/USER",
+    iconFile: "/client-icons/workbuddy.svg",
+    installUrl: "https://www.codebuddy.cn/work/"
   }
 ];
 
