@@ -1059,6 +1059,11 @@ function renderClientMain(client: Client): string {
   const rt = runtime(client);
   const installed = rt?.installed ?? false;
   const canLaunch = Boolean(rt?.executablePath);
+  // 扩展/WSL 客户端（id 含 @tag）后端无法按原 id 启动/导出/导入/删除配置，隐藏三点菜单避免误触报错。
+  const isExtra = client.id.includes("@");
+  const clientMenuHtml = isExtra
+    ? ""
+    : `<div class="client-menu-wrap"><button id="client-actions-toggle" class="ghost-dots ${state.clientMenuOpen ? "is-open" : ""}" type="button">${svgIcon("more", 18)}</button>${state.clientMenuOpen ? `<div class="client-menu" role="menu"><button class="client-menu-item" data-client-action="export" data-client-id="${html(client.id)}" type="button" ${installed ? "" : "disabled"}>导出配置</button><button class="client-menu-item" data-client-action="import" data-client-id="${html(client.id)}" type="button" ${installed ? "" : "disabled"}>导入配置</button><button class="client-menu-item danger" data-client-action="delete" data-client-id="${html(client.id)}" type="button" ${installed ? "" : "disabled"}>删除客户端</button></div>` : ""}</div>`;
   const mcps = clientMcps(client.id);
   const skills = clientSkills(client.id);
   const rules = clientRules(client.id);
@@ -1077,7 +1082,7 @@ function renderClientMain(client: Client): string {
           <span class="avatar large image">${img(client.iconFile, client.name)}</span>
           <div><h2>${html(client.name)}</h2></div>
         </div>
-        <div class="hero-actions"><button class="primary-button launch-client-button" data-client-id="${html(client.id)}" type="button" ${canLaunch ? "" : "disabled"}>${canLaunch ? "▶ 启动客户端" : installed ? "未找到启动程序" : "需要安装客户端"}</button><div class="client-menu-wrap"><button id="client-actions-toggle" class="ghost-dots ${state.clientMenuOpen ? "is-open" : ""}" type="button">${svgIcon("more", 18)}</button>${state.clientMenuOpen ? `<div class="client-menu" role="menu"><button class="client-menu-item" data-client-action="export" data-client-id="${html(client.id)}" type="button" ${installed ? "" : "disabled"}>导出配置</button><button class="client-menu-item" data-client-action="import" data-client-id="${html(client.id)}" type="button" ${installed ? "" : "disabled"}>导入配置</button><button class="client-menu-item danger" data-client-action="delete" data-client-id="${html(client.id)}" type="button" ${installed ? "" : "disabled"}>删除客户端</button></div>` : ""}</div></div>
+        <div class="hero-actions"><button class="primary-button launch-client-button" data-client-id="${html(client.id)}" type="button" ${canLaunch ? "" : "disabled"}>${canLaunch ? "▶ 启动客户端" : installed ? "未找到启动程序" : "需要安装客户端"}</button>${clientMenuHtml}</div>
       </div>
       ${
         !installed
@@ -1126,18 +1131,6 @@ function renderClientView(): string {
 // —— WSL 独立管理页 ——
 function wslTag(distro: string): string {
   return `wsl-${distro}`;
-}
-function wslInstanceSkills(distro: string): RuntimeSkill[] {
-  const suffix = `@${wslTag(distro)}`;
-  return (state.environment?.skills ?? []).filter((s) => s.clientId.endsWith(suffix));
-}
-function wslInstanceMcps(distro: string): RuntimeMcpServer[] {
-  const suffix = `@${wslTag(distro)}`;
-  return (state.environment?.mcpServers ?? []).filter((s) => s.clientId.endsWith(suffix));
-}
-function wslInstanceRules(distro: string): RuntimeRule[] {
-  const suffix = `@${wslTag(distro)}`;
-  return (state.environment?.rules ?? []).filter((r) => r.clientId.endsWith(suffix));
 }
 
 async function loadWslInstances(): Promise<void> {
@@ -2282,18 +2275,6 @@ function bindInteractions(): void {
     });
   });
   document.querySelector<HTMLButtonElement>("#refresh-wsl")?.addEventListener("click", () => void loadWslInstances());
-  document.querySelectorAll<HTMLButtonElement>("[data-wsl-tab]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.activeWslTab = (button.dataset.wslTab as typeof state.activeWslTab) ?? "skills";
-      renderApp(true);
-    });
-  });
-  document.querySelectorAll<HTMLElement>("[data-wsl-skill-path]").forEach((row) => {
-    row.addEventListener("click", () => {
-      state.selectedWslSkillPath = row.dataset.wslSkillPath ?? "";
-      renderApp(true);
-    });
-  });
   document.querySelectorAll<HTMLButtonElement>("[data-wsl-terminal]").forEach((button) => {
     button.addEventListener("click", () => {
       void invoke("wsl_open_terminal", { distro: button.dataset.wslTerminal ?? "" }).catch((e) =>
