@@ -45,6 +45,38 @@ export function svgIcon(name: string, size = 16): string {
   return `<svg class="svg-icon" xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] ?? ""}</svg>`;
 }
 
+// WSL 发行版名 → public/distro-icons 下的图标文件。名字来自 `wsl -l -v`，
+// 形如 Debian / Ubuntu-22.04 / kali-linux / openSUSE-Tumbleweed，按小写子串匹配。
+export function distroIconFile(distro: string): string {
+  const n = distro.toLowerCase();
+  const rules: Array<[RegExp, string]> = [
+    [/ubuntu/, "ubuntu"],
+    [/debian/, "debian"],
+    [/alpine/, "alpinelinux"],
+    [/fedora/, "fedora"],
+    [/centos/, "centos"],
+    [/arch/, "archlinux"],
+    [/manjaro/, "manjaro"],
+    [/kali/, "kalilinux"],
+    [/rocky/, "rockylinux"],
+    [/alma/, "almalinux"],
+    [/gentoo/, "gentoo"],
+    [/mint/, "linuxmint"],
+    [/raspberry|raspbian/, "raspberrypi"],
+    [/oracle/, "oracle"],
+    [/(rhel|red\s*hat|redhat)/, "redhat"],
+    [/opensuse|tumbleweed|leap/, "opensuse"],
+    [/sles|suse/, "suse"],
+  ];
+  for (const [re, file] of rules) if (re.test(n)) return `${file}.svg`;
+  return "linux.svg";
+}
+
+export function distroIcon(distro: string, cls = "distro-icon-img"): string {
+  const file = distroIconFile(distro);
+  return `<img class="${cls}" src="/distro-icons/${file}" alt="${html(distro)}" />`;
+}
+
 export function skillKey(skill: RuntimeSkill): string {
   return `${skill.clientId}::${skill.path}`;
 }

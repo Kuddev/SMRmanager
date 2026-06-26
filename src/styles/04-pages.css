@@ -1315,6 +1315,22 @@
   background: var(--control-bg);
 }
 
+/* 发行版图标：在圆角底框内留出内边距，避免 logo 贴边/贴太紧。 */
+.distro-icon-img {
+  width: 60%;
+  height: 60%;
+  object-fit: contain;
+  display: block;
+}
+
+/* 列表标题里的内联小图标（L2 实例名旁）。 */
+.distro-icon-img.sm {
+  width: 18px;
+  height: 18px;
+  vertical-align: -3px;
+  margin-right: 2px;
+}
+
 .wsl-instance-meta {
   display: flex;
   min-width: 0;

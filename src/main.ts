@@ -50,6 +50,7 @@ import {
   iconPath,
   img,
   svgIcon,
+  distroIcon,
   skillKey,
   epoch,
   updateTimestamp
@@ -1215,7 +1216,7 @@ function renderWslInstanceLanding(): string {
     .map((d) => {
       const clientCount = wslInstanceClients(d.distro).length;
       return `<button class="wsl-instance-card" data-wsl-distro="${html(d.distro)}" type="button">
-        <span class="wsl-instance-icon">🐧</span>
+        <span class="wsl-instance-icon">${distroIcon(d.distro)}</span>
         <div class="wsl-instance-meta">
           <strong>${html(d.distro)}${d.isDefault ? `<span class="wsl-default-tag">默认</span>` : ""}</strong>
           <small><span class="wsl-status-dot ${d.running ? "running" : "stopped"}"></span>${d.running ? "运行中" : "已停止"}${clientCount ? ` · ${clientCount} 个 CLI` : ""}</small>
@@ -1224,7 +1225,7 @@ function renderWslInstanceLanding(): string {
       </button>`;
     })
     .join("");
-  return `<section class="client-main-card management-card">
+  return `<section class="client-main-card management-card skills-page-card">
     <div class="skills-page-hero">
       <div class="hero-left"><span class="avatar large wsl-avatar">🐧</span><div><h2>WSL 管理</h2><p>选择一个虚拟机进入，按 CLI 客户端分类管理其中的 Skills / MCP / Rules。</p></div></div>
       <div class="skills-hero-actions"><button id="refresh-wsl" class="secondary-button" type="button">${state.wslDetecting ? "检测中..." : "刷新实例"}</button></div>
@@ -1257,7 +1258,7 @@ function renderWslClientColumn(): string {
     .join("");
   return `<section class="client-list-card">
     <button class="wsl-back-button" data-wsl-back="1" type="button">${svgIcon("chevron-left", 15)}<span>全部实例</span></button>
-    <div class="list-heading wsl-instance-heading"><strong>🐧 ${html(distro)}</strong><span class="wsl-status-dot ${running ? "running" : "stopped"}"></span></div>
+    <div class="list-heading wsl-instance-heading"><strong>${distroIcon(distro, "distro-icon-img sm")} ${html(distro)}</strong><span class="wsl-status-dot ${running ? "running" : "stopped"}"></span></div>
     <div class="wsl-instance-controls">
       ${running
         ? `<button class="ghost-mini-button" data-wsl-stop="${html(distro)}" type="button">停止</button>`
@@ -1274,7 +1275,7 @@ function renderWslClientColumn(): string {
 function renderWslClientMain(): string {
   const client = wslInstanceClients(state.activeWslDistro).find((c) => c.id === state.wslActiveClientId);
   if (!client) {
-    return `<section class="client-main-card"><div class="client-hero"><div class="hero-left"><span class="avatar large wsl-avatar">🐧</span><div><h2>${html(state.activeWslDistro)}</h2></div></div></div><div class="empty-config-panel">该实例暂无可管理的 CLI 客户端，或尚未启动。</div></section>`;
+    return `<section class="client-main-card"><div class="client-hero"><div class="hero-left"><span class="avatar large image distro-avatar">${distroIcon(state.activeWslDistro)}</span><div><h2>${html(state.activeWslDistro)}</h2></div></div></div><div class="empty-config-panel">该实例暂无可管理的 CLI 客户端，或尚未启动。</div></section>`;
   }
   return renderClientMain(client);
 }
@@ -2161,7 +2162,8 @@ function renderApp(preserveScroll = false): void {
 }
 
 function bindInteractions(): void {
-  document.querySelectorAll<HTMLButtonElement>(".client-row").forEach((button) => {
+  // 仅主页客户端行：WSL L2 复用 .client-row 但带 data-wsl-client，由专属 handler 处理，避免切回主页。
+  document.querySelectorAll<HTMLButtonElement>(".client-row:not([data-wsl-client])").forEach((button) => {
     button.addEventListener("click", () => {
       state.skillContextMenu = null;
       state.clientMenuOpen = false;
