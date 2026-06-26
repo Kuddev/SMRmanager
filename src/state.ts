@@ -163,6 +163,7 @@ export type AppState = {
   activeProjectClientId: string;
   projectSkillFilter: "all" | "enabled" | "disabled";
   projectAddSkillDialog: { clientId: string } | null;
+  projectAddSkillQuery: string;
   wslDistros: WslDistro[];
   wslDetecting: boolean;
   wslDetectError: string | null;
@@ -227,6 +228,7 @@ export const state: AppState = {
   activeProjectClientId: "",
   projectSkillFilter: "all",
   projectAddSkillDialog: null,
+  projectAddSkillQuery: "",
   wslDistros: [],
   wslDetecting: false,
   wslDetectError: null,

@@ -1,4 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import "./day-night-toggle";
@@ -43,6 +42,30 @@ import type {
 
 
 import { navItems, clients, availableMcps, marketSkills, marketMcps } from "./catalog";
+import { api } from "./core/api";
+import {
+  runtime,
+  clientMcps,
+  clientSkills,
+  clientRules,
+  installedClients,
+  extraRuntimeClients,
+  orderedBaseClients,
+  displayClients,
+  extraClientIdSet,
+  isExtraSourceSkill,
+  skillTargetClients,
+  skillByPath,
+  selectedPathsFromKeys,
+  transferPathsForContext,
+  preferredSkillTargetId,
+  clientNameById,
+  marketSkillTargets,
+  mcpTargetClients,
+  skillWritableClientIds,
+  mcpWritableClientIds
+} from "./core/data";
+import { setSkillActionMessage } from "./core/toast";
 import {
   systemPrefersDark,
   resolveTheme,
@@ -96,7 +119,7 @@ async function detectWslDistros(): Promise<void> {
   state.wslDetectError = null;
   renderApp(true);
   try {
-    state.wslDistros = await invoke<WslDistro[]>("list_wsl_distros");
+    state.wslDistros = await api.listWslDistros();
     if (state.wslDistros.length === 0) state.wslDetectError = "未检测到 WSL 发行版";
   } catch (error) {
     state.wslDistros = [];
@@ -117,136 +140,7 @@ function addWslDistroAsRoot(distro: WslDistro): void {
 }
 
 
-function runtime(client: Client): RuntimeClient | undefined {
-  return state.environment?.clients.find((item) => item.id === client.id);
-}
-
-function clientMcps(clientId: string): RuntimeMcpServer[] {
-  return state.environment?.mcpServers.filter((item) => item.clientId === clientId) ?? [];
-}
-
-function clientSkills(clientId: string): RuntimeSkill[] {
-  return (state.environment?.skills ?? [])
-    .filter((item) => item.clientId === clientId)
-    .sort((a, b) => Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0));
-}
-
-function clientRules(clientId: string): RuntimeRule[] {
-  return (state.environment?.rules ?? [])
-    .filter((item) => item.clientId === clientId)
-    .sort((a, b) => Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0));
-}
-
-function installedClients(): RuntimeClient[] {
-  return state.environment?.clients.filter((item) => item.installed) ?? [];
-}
-
-// 扩展根/WSL 检测出的客户端（source 非 windows），合成为 Client 以便在客户端页独立展示。
-function extraRuntimeClients(): RuntimeClient[] {
-  return (state.environment?.clients ?? []).filter((item) => item.source && item.source !== "windows");
-}
-
-// 按用户自定义顺序排列固定客户端；未在顺序表中的（新客户端）按 catalog 原序追加在后。
-function orderedBaseClients(): Client[] {
-  if (state.clientOrder.length === 0) return clients;
-  const remaining = new Map(clients.map((client) => [client.id, client]));
-  const ordered: Client[] = [];
-  for (const id of state.clientOrder) {
-    const client = remaining.get(id);
-    if (client) {
-      ordered.push(client);
-      remaining.delete(id);
-    }
-  }
-  for (const client of clients) {
-    if (remaining.has(client.id)) ordered.push(client);
-  }
-  return ordered;
-}
-
-function displayClients(): Client[] {
-  const extra = extraRuntimeClients().map((rt): Client => {
-    const baseId = rt.id.split("@")[0];
-    const base = clients.find((b) => b.id === baseId);
-    return {
-      id: rt.id,
-      name: rt.name,
-      type: rt.source === "wsl" ? "WSL 客户端" : rt.source === "project" ? "项目客户端" : "扩展目录",
-      fallbackPath: rt.detectedConfigPaths[0] ?? "",
-      description: rt.description,
-      iconFile: base?.iconFile ?? "/client-icons/claude.svg",
-      installUrl: rt.installUrl
-    };
-  });
-  return [...orderedBaseClients(), ...extra];
-}
-
-// WSL/扩展根来源的客户端 id 集合；判断某 skill 是否来自 WSL（只读保护用）。
-function extraClientIdSet(): Set<string> {
-  return new Set(extraRuntimeClients().map((item) => item.id));
-}
-
-function isExtraSourceSkill(skill: RuntimeSkill): boolean {
-  return extraClientIdSet().has(skill.clientId);
-}
-
-const skillWritableClientIds = new Set(["claude", "claude-desktop", "codex", "gemini", "opencode", "openclaw", "hermes", "cursor", "trae"]);
-
-function skillTargetClients(sourceClientId?: string): RuntimeClient[] {
-  const configuredOrder = new Map(clients.map((client, index) => [client.id, index]));
-  return installedClients()
-    .filter(
-      (client) =>
-        skillWritableClientIds.has(client.id) &&
-        client.id !== sourceClientId &&
-        Boolean(client.executablePath || client.detectedConfigPaths.length > 0 || client.skillsCount > 0)
-    )
-    .sort((a, b) => (configuredOrder.get(a.id) ?? 999) - (configuredOrder.get(b.id) ?? 999));
-}
-
-function skillByPath(path: string): RuntimeSkill | undefined {
-  return state.environment?.skills.find((skill) => skill.path === path);
-}
-
-function selectedPathsFromKeys(): string[] {
-  const paths = new Set<string>();
-  for (const skill of state.environment?.skills ?? []) {
-    if (state.selectedSkillKeys.has(skillKey(skill))) paths.add(skill.path);
-  }
-  return [...paths];
-}
-
-function transferPathsForContext(key: string, path: string): string[] {
-  if (state.currentView === "skills" && state.selectedSkillKeys.has(key) && state.selectedSkillKeys.size > 1) {
-    return selectedPathsFromKeys();
-  }
-  return [path];
-}
-
-function preferredSkillTargetId(targets: RuntimeClient[]): string {
-  if (targets.some((client) => client.id === state.skillBulkTargetId)) return state.skillBulkTargetId;
-  return targets[0]?.id ?? "";
-}
-
-function clientNameById(id: string): string {
-  return clients.find((client) => client.id === id)?.name ?? id;
-}
-
-// 市场 skill 的可安装目标：该 skill 支持 ∩ 已安装且可写入 Skills 的客户端。
-function marketSkillTargets(skill: MarketSkill): RuntimeClient[] {
-  const supported = new Set(skill.supportedClients);
-  return skillTargetClients().filter((client) => supported.has(client.id));
-}
-
-// 可写入 MCP 配置的已安装客户端（与后端 mcp_write_target 对齐）。
-const mcpWritableClientIds = new Set(["claude", "claude-desktop", "gemini", "cursor", "trae", "codex"]);
-
-function mcpTargetClients(): RuntimeClient[] {
-  const order = new Map(clients.map((client, index) => [client.id, index]));
-  return installedClients()
-    .filter((client) => mcpWritableClientIds.has(client.id))
-    .sort((a, b) => (order.get(a.id) ?? 999) - (order.get(b.id) ?? 999));
-}
+// —— 数据访问 / Model 层（runtime / displayClients / clientSkills 等）已抽到 core/data.ts ——
 
 function isUpdateDismissed(): boolean {
   const version = state.updateInfo?.latestVersion;
@@ -272,7 +166,7 @@ async function loadEnvironment(force = false): Promise<void> {
   state.detectionLoading = true;
   renderApp(true);
   try {
-    state.environment = await invoke<DetectionSnapshot>("detect_environment", { extraRoots: allExtraRoots() });
+    state.environment = await api.detectEnvironment(allExtraRoots());
     state.detectionError = null;
     const list = displayClients();
     const selected = list[state.activeClientIndex] ?? list[0];
@@ -292,7 +186,7 @@ async function checkUpdates(manual = false): Promise<void> {
   if (manual) state.updateError = null;
   renderApp();
   try {
-    state.updateInfo = await invoke<AppUpdateCheckResult>("check_app_update", { endpoint: null });
+    state.updateInfo = await api.checkAppUpdate(null);
     state.updateError = null;
   } catch (error) {
     state.updateError = error instanceof Error ? error.message : String(error);
@@ -303,68 +197,7 @@ async function checkUpdates(manual = false): Promise<void> {
   }
 }
 
-type ToastType = "info" | "success" | "error";
-
-function ensureToastStack(): HTMLElement {
-  let stack = document.getElementById("toast-stack");
-  if (!stack) {
-    stack = document.createElement("div");
-    stack.id = "toast-stack";
-    stack.className = "toast-stack";
-    document.body.appendChild(stack);
-  }
-  return stack;
-}
-
-function createToast(message: string, type: ToastType): HTMLElement {
-  const stack = ensureToastStack();
-  const toast = document.createElement("div");
-  toast.className = `toast toast-${type}`;
-  const iconEl = document.createElement("span");
-  iconEl.className = "toast-icon";
-  iconEl.textContent = type === "success" ? "✓" : type === "error" ? "!" : "↻";
-  const textEl = document.createElement("span");
-  textEl.className = "toast-text";
-  textEl.textContent = message;
-  toast.append(iconEl, textEl);
-  stack.appendChild(toast);
-  requestAnimationFrame(() => toast.classList.add("is-visible"));
-  return toast;
-}
-
-function dismissToast(toast: HTMLElement): void {
-  toast.classList.remove("is-visible");
-  window.setTimeout(() => toast.remove(), 220);
-}
-
-function toastTypeForMessage(message: string): ToastType {
-  if (/失败|错误|拒绝/.test(message)) return "error";
-  if (/完成|成功|已复制|已删除|已移动|已启用|已禁用|已写入|已导入|已安装/.test(message)) return "success";
-  return "info";
-}
-
-// 浮层 toast：独立于 renderApp，避免反馈时触发整页重建/列表抖动。
-// 始终只保留一个 toast，新消息替换旧的，避免连续操作时多个 toast 叠加。
-function setSkillActionMessage(message: string | null, timeoutMs = 2600): void {
-  if (state.skillActionMessageTimer !== null) {
-    window.clearTimeout(state.skillActionMessageTimer);
-    state.skillActionMessageTimer = null;
-  }
-  if (state.activeToast) {
-    dismissToast(state.activeToast);
-    state.activeToast = null;
-  }
-  if (!message) return;
-  const toast = createToast(message, toastTypeForMessage(message));
-  state.activeToast = toast;
-  if (timeoutMs > 0) {
-    state.skillActionMessageTimer = window.setTimeout(() => {
-      dismissToast(toast);
-      if (state.activeToast === toast) state.activeToast = null;
-      state.skillActionMessageTimer = null;
-    }, timeoutMs);
-  }
-}
+// —— Toast 反馈层（setSkillActionMessage 等）已抽到 core/toast.ts ——
 
 async function deleteSkills(paths: string[]): Promise<void> {
   const uniquePaths = [...new Set(paths)].filter(Boolean);
@@ -372,7 +205,7 @@ async function deleteSkills(paths: string[]): Promise<void> {
   state.deleteBusy = true;
   setSkillActionMessage(`正在删除 ${uniquePaths.length} 个 Skill...`, 0);
   try {
-    const result = await invoke<DeleteSkillsResult>("delete_skills", { paths: uniquePaths });
+    const result = await api.deleteSkills(uniquePaths);
     const removedPaths = new Set(uniquePaths);
     for (const key of [...state.selectedSkillKeys]) {
       if (removedPaths.has(key.slice(key.indexOf("::") + 2))) state.selectedSkillKeys.delete(key);
@@ -508,8 +341,6 @@ function confirmSkillGroupDialog(name: string): void {
   renderApp(true);
 }
 
-type LibraryOpResult = { ok: number; failed: string[]; message: string };
-
 function openGitInstall(): void {
   state.gitInstallDialog = { url: "", subdir: "", loading: false, inspected: null, error: null };
   renderApp(true);
@@ -528,7 +359,7 @@ async function gitInspect(): Promise<void> {
   state.gitInstallDialog.inspected = null;
   renderApp(true);
   try {
-    const res = await invoke<GitInspectResult>("git_inspect", { url, subdir: state.gitInstallDialog.subdir.trim() || null });
+    const res = await api.gitInspect(url, state.gitInstallDialog.subdir.trim() || null);
     if (!state.gitInstallDialog) return;
     state.gitInstallDialog.inspected = res;
     state.gitInstallDialog.loading = false;
@@ -571,7 +402,7 @@ async function gitApply(): Promise<void> {
   state.gitInstallDialog.loading = true;
   renderApp(true);
   try {
-    const res = await invoke<GitApplyResult>("git_apply", {
+    const res = await api.gitApply({
       cachePath: insp.cachePath,
       skillRelPaths,
       skillTarget,
@@ -595,7 +426,7 @@ async function adoptToLibrary(paths: string[]): Promise<void> {
   state.skillTransferBusy = true;
   setSkillActionMessage(`正在收编 ${unique.length} 个 Skill 进中心库...`, 0);
   try {
-    const result = await invoke<LibraryOpResult>("adopt_skills_to_library", { paths: unique, extraRoots: allExtraRoots() });
+    const result = await api.adoptSkillsToLibrary(unique, allExtraRoots());
     state.skillTransferBusy = false;
     state.selectedSkillKeys.clear();
     await loadEnvironment(true);
@@ -612,7 +443,7 @@ async function linkSkillToClients(skillPath: string, clientIds: string[]): Promi
   state.skillTransferBusy = true;
   setSkillActionMessage("正在链接到客户端...", 0);
   try {
-    const result = await invoke<LibraryOpResult>("link_skill_to_clients", { librarySkillPath: skillPath, clientIds });
+    const result = await api.linkSkillToClients(skillPath, clientIds);
     state.skillTransferBusy = false;
     state.skillLinkDialog = null;
     await loadEnvironment(true);
@@ -629,7 +460,7 @@ async function unlinkSkillFromClients(skillPath: string, clientIds: string[]): P
   state.skillTransferBusy = true;
   setSkillActionMessage("正在移除链接...", 0);
   try {
-    const result = await invoke<LibraryOpResult>("unlink_skill_from_clients", { librarySkillPath: skillPath, clientIds });
+    const result = await api.unlinkSkillFromClients(skillPath, clientIds);
     state.skillTransferBusy = false;
     await loadEnvironment(true);
     const failedText = result.failed.length ? `；失败：${result.failed.join(" / ")}` : "";
@@ -648,12 +479,7 @@ async function transferSkills(paths: string[], targetClientId: string, action: S
   const verb = action === "move" ? "移动" : "复制";
   setSkillActionMessage(`正在${verb} ${uniquePaths.length} 个 Skill...`, 0);
   try {
-    const result = await invoke<TransferSkillsResult>("transfer_skills", {
-      paths: uniquePaths,
-      targetClientId,
-      action,
-      extraRoots: allExtraRoots()
-    });
+    const result = await api.transferSkills(uniquePaths, targetClientId, action, allExtraRoots());
     const done = action === "move" ? result.moved : result.copied;
     const failedText = result.failed.length ? `；失败 ${result.failed.length} 个：${result.failed.join(" / ")}` : "";
     const targetText = result.targetRoot ? `\n目标目录：${result.targetRoot}` : "";
@@ -700,7 +526,7 @@ async function importSkill(sourceDir: string, targetClientId: string): Promise<v
   renderApp(true);
   setSkillActionMessage("正在导入 Skill...", 0);
   try {
-    const result = await invoke<ImportSkillResult>("import_skill", { sourceDir, targetClientId });
+    const result = await api.importSkill(sourceDir, targetClientId);
     state.skillTransferBusy = false;
     await loadEnvironment(true);
     setSkillActionMessage(`${result.message}`, 3200);
@@ -715,19 +541,17 @@ async function installMarketSkill(skill: MarketSkill, method: InstallMethod, tar
   state.installLogs[skill.id] = `正在执行：${method.detail}`;
   renderApp();
   try {
-    const result = await invoke<InstallResult>("install_market_skill", {
-      request: {
-        skillId: skill.id,
-        name: skill.name,
-        method: method.id,
-        packageName: method.packageName,
-        args: method.args,
-        repository: method.repository,
-        subdir: method.subdir,
-        registryUrl: method.registryUrl,
-        manifestUrl: method.manifestUrl,
-        targetClientId
-      }
+    const result = await api.installMarketSkill({
+      skillId: skill.id,
+      name: skill.name,
+      method: method.id,
+      packageName: method.packageName,
+      args: method.args,
+      repository: method.repository,
+      subdir: method.subdir,
+      registryUrl: method.registryUrl,
+      manifestUrl: method.manifestUrl,
+      targetClientId
     });
     state.installLogs[skill.id] = `${result.message}${result.installedPath ? `\n路径：${result.installedPath}` : ""}${result.log ? `\n${result.log.slice(-1200)}` : ""}`;
     void loadEnvironment(true);
@@ -749,15 +573,12 @@ async function installMcpServer(mcp: MarketMcp, targetClientId: string): Promise
   renderApp();
   setSkillActionMessage(`正在写入 MCP「${mcp.name}」...`, 0);
   try {
-    await invoke<string>("install_mcp_server", {
-      clientId: targetClientId,
-      server: {
-        name: mcp.id,
-        transport: mcp.transport,
-        command: mcp.command ?? null,
-        args: mcp.args ?? null,
-        url: mcp.url ?? null
-      }
+    await api.installMcpServer(targetClientId, {
+      name: mcp.id,
+      transport: mcp.transport,
+      command: mcp.command ?? null,
+      args: mcp.args ?? null,
+      url: mcp.url ?? null
     });
     state.skillTransferBusy = false;
     await loadEnvironment(true);
@@ -773,7 +594,7 @@ async function toggleMcpEnabled(clientId: string, name: string, enabled: boolean
   state.skillTransferBusy = true;
   setSkillActionMessage(`正在${enabled ? "启用" : "禁用"} ${name}...`, 0);
   try {
-    await invoke<string>("set_mcp_enabled", { clientId, name, enabled });
+    await api.setMcpEnabled(clientId, name, enabled);
     state.skillTransferBusy = false;
     await loadEnvironment(true);
     setSkillActionMessage(`已${enabled ? "启用" : "禁用"} ${name}`, 2400);
@@ -788,7 +609,7 @@ async function setAllMcpEnabled(enabled: boolean): Promise<void> {
   state.skillTransferBusy = true;
   setSkillActionMessage(`正在${enabled ? "启用" : "禁用"}全部 MCP...`, 0);
   try {
-    const message = await invoke<string>("set_all_mcp_enabled", { enabled });
+    const message = await api.setAllMcpEnabled(enabled);
     state.skillTransferBusy = false;
     await loadEnvironment(true);
     setSkillActionMessage(`${message}`, 2800);
@@ -812,7 +633,7 @@ async function refreshInstalledMarketSkills(): Promise<void> {
   ];
   if (packages.length === 0) return;
   try {
-    const installed = await invoke<string[]>("check_global_packages", { packages });
+    const installed = await api.checkGlobalPackages(packages);
     const installedSet = new Set(installed);
     const ids = new Set<string>();
     for (const skill of marketSkills) {
@@ -840,7 +661,7 @@ async function exportClientConfig(clientId: string): Promise<void> {
   if (!dir || Array.isArray(dir)) return;
   setSkillActionMessage("正在导出配置...", 0);
   try {
-    const message = await invoke<string>("export_client_config", { clientId, targetDir: dir });
+    const message = await api.exportClientConfig(clientId, dir);
     setSkillActionMessage(message, 3200);
   } catch (error) {
     setSkillActionMessage(`导出失败：${error instanceof Error ? error.message : String(error)}`, 5200);
@@ -860,7 +681,7 @@ async function importClientConfig(clientId: string): Promise<void> {
   if (!file || Array.isArray(file)) return;
   setSkillActionMessage("正在导入配置...", 0);
   try {
-    const message = await invoke<string>("import_client_config", { clientId, sourceFile: file });
+    const message = await api.importClientConfig(clientId, file);
     await loadEnvironment(true);
     setSkillActionMessage(message, 3200);
   } catch (error) {
@@ -871,7 +692,7 @@ async function importClientConfig(clientId: string): Promise<void> {
 async function deleteClientConfig(clientId: string): Promise<void> {
   setSkillActionMessage("正在删除客户端配置...", 0);
   try {
-    const message = await invoke<string>("delete_client_config", { clientId });
+    const message = await api.deleteClientConfig(clientId);
     await loadEnvironment(true);
     setSkillActionMessage(message, 3600);
   } catch (error) {
@@ -1160,7 +981,7 @@ async function loadWslInstances(): Promise<void> {
   state.wslDetectError = null;
   renderApp(true);
   try {
-    state.wslDistros = await invoke<WslDistro[]>("list_wsl_distros");
+    state.wslDistros = await api.listWslDistros();
     state.wslInstancesLoaded = true;
     if (state.wslDistros.length === 0) state.wslDetectError = "未检测到 WSL 发行版（需安装 WSL）";
     if (state.activeWslDistro && !state.wslDistros.some((d) => d.distro === state.activeWslDistro)) {
@@ -1197,9 +1018,15 @@ function selectWslDistro(name: string): void {
   renderApp(true);
 }
 
+const WSL_ACTIONS: Record<string, (distro: string) => Promise<void>> = {
+  wsl_set_default: api.wslSetDefault,
+  wsl_start: api.wslStart,
+  wsl_terminate: api.wslTerminate
+};
+
 async function wslControl(command: string, distro: string, okMsg: string): Promise<void> {
   try {
-    await invoke(command, { distro });
+    await WSL_ACTIONS[command](distro);
     setSkillActionMessage(okMsg, 2400);
     await loadWslInstances();
   } catch (error) {
@@ -1389,12 +1216,7 @@ async function setProjectSkillEnabled(clientId: string, skillDir: string, enable
   if (skill) skill.enabled = enabled;
   renderApp(true);
   try {
-    const msg = await invoke<string>("set_project_skill_enabled", {
-      projectPath: project.path,
-      clientId,
-      skillDir,
-      enabled
-    });
+    const msg = await api.setProjectSkillEnabled(project.path, clientId, skillDir, enabled);
     setSkillActionMessage(msg, 2000);
   } catch (error) {
     if (skill) skill.enabled = !enabled;
@@ -1550,11 +1372,14 @@ function projectAddSkillCandidates(): RuntimeSkill[] {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function renderProjectAddSkillDialog(): string {
-  const dlg = state.projectAddSkillDialog;
-  if (!dlg) return "";
-  const candidates = projectAddSkillCandidates();
-  const rows = candidates.length
+// 仅渲染候选行（供搜索时局部更新 .add-skill-list，避免整页 renderApp 抖动）。搜索只匹配名称/客户端。
+function projectAddSkillRows(): string {
+  const all = projectAddSkillCandidates();
+  const query = state.projectAddSkillQuery.trim().toLowerCase();
+  const candidates = query
+    ? all.filter((s) => s.name.toLowerCase().includes(query) || s.clientName.toLowerCase().includes(query))
+    : all;
+  return candidates.length
     ? candidates
         .map(
           (s) => `
@@ -1564,14 +1389,22 @@ function renderProjectAddSkillDialog(): string {
         </div>`
         )
         .join("")
-    : `<div class="context-empty">没有可下发的 Skill。请先在「全局」页或中心库准备 Skill。</div>`;
+    : `<div class="context-empty">${
+        all.length ? "没有匹配的 Skill。" : "没有可下发的 Skill。请先在「全局」页或中心库准备 Skill。"
+      }</div>`;
+}
+
+function renderProjectAddSkillDialog(): string {
+  const dlg = state.projectAddSkillDialog;
+  if (!dlg) return "";
   return `
     <div class="alert-dialog-backdrop" role="presentation" data-add-skill-backdrop="1">
       <section class="alert-dialog project-add-skill-dialog" role="dialog" aria-modal="true">
         <div class="alert-dialog-copy">
           <h2>添加 Skill 到项目</h2>
           <p>从全局 / 中心库已检测的 Skill 中选择，复制到当前项目客户端（仅对本项目生效）。</p>
-          <div class="context-target-list add-skill-list">${rows}</div>
+          <label class="skills-search-box add-skill-search-box"><span>${svgIcon("search", 16)}</span><input id="add-skill-search" value="${html(state.projectAddSkillQuery)}" placeholder="搜索 Skill 名称 / 客户端..." /></label>
+          <div class="context-target-list add-skill-list">${projectAddSkillRows()}</div>
         </div>
         <div class="alert-dialog-actions">
           <button class="secondary-button" data-close-add-skill="1" type="button">关闭</button>
@@ -2319,9 +2152,9 @@ function ruleTargetClients(sourceClientId?: string): RuntimeClient[] {
 async function copyRuleToClient(rulePath: string, targetClientId: string, action: "copy" | "move" = "copy"): Promise<void> {
   closeRuleContextMenu();
   try {
-    const message = await invoke<string>("copy_rule_to_client", { rulePath, targetClientId });
+    const message = await api.copyRuleToClient(rulePath, targetClientId);
     if (action === "move") {
-      await invoke<DeleteSkillsResult>("delete_rules", { paths: [rulePath] });
+      await api.deleteRules([rulePath]);
       setSkillActionMessage("已移动 Rule 到目标客户端", 2600);
     } else {
       setSkillActionMessage(message, 2600);
@@ -2336,7 +2169,7 @@ async function deleteRules(paths: string[]): Promise<void> {
   const unique = [...new Set(paths)].filter(Boolean);
   if (unique.length === 0) return;
   try {
-    const result = await invoke<DeleteSkillsResult>("delete_rules", { paths: unique });
+    const result = await api.deleteRules(unique);
     setSkillActionMessage(result.message, 2600);
     await loadEnvironment(true);
   } catch (error) {
@@ -2618,18 +2451,26 @@ function bindInteractions(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-add-project-skill]").forEach((button) => {
     button.addEventListener("click", () => {
       state.projectAddSkillDialog = { clientId: button.dataset.addProjectSkill ?? "" };
+      state.projectAddSkillQuery = "";
       renderApp(true);
     });
   });
-  document.querySelectorAll<HTMLButtonElement>("[data-add-skill-path]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const dlg = state.projectAddSkillDialog;
-      if (!dlg) return;
-      const path = button.dataset.addSkillPath ?? "";
-      state.projectAddSkillDialog = null;
-      renderApp(true);
-      void transferSkills([path], dlg.clientId, "copy");
-    });
+  const addSkillSearch = document.querySelector<HTMLInputElement>("#add-skill-search");
+  addSkillSearch?.addEventListener("input", () => {
+    state.projectAddSkillQuery = addSkillSearch.value;
+    // 只局部更新列表，不整页 renderApp（避免抖动；input 不重建、焦点天然保持）。
+    const list = document.querySelector<HTMLElement>(".add-skill-list");
+    if (list) list.innerHTML = projectAddSkillRows();
+  });
+  // 列表用事件委托（搜索局部更新 innerHTML 后按钮仍可点）。
+  document.querySelector<HTMLElement>(".add-skill-list")?.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLElement>("[data-add-skill-path]");
+    if (!button) return;
+    const dlg = state.projectAddSkillDialog;
+    if (!dlg) return;
+    state.projectAddSkillDialog = null;
+    renderApp(true);
+    void transferSkills([button.dataset.addSkillPath ?? ""], dlg.clientId, "copy");
   });
   document.querySelectorAll<HTMLElement>("[data-close-add-skill], [data-add-skill-backdrop]").forEach((el) => {
     el.addEventListener("click", (event) => {
@@ -2641,7 +2482,7 @@ function bindInteractions(): void {
   document.querySelector<HTMLButtonElement>("#refresh-wsl")?.addEventListener("click", () => void loadWslInstances());
   document.querySelectorAll<HTMLButtonElement>("[data-wsl-terminal]").forEach((button) => {
     button.addEventListener("click", () => {
-      void invoke("wsl_open_terminal", { distro: button.dataset.wslTerminal ?? "" }).catch((e) =>
+      void api.wslOpenTerminal(button.dataset.wslTerminal ?? "").catch((e) =>
         setSkillActionMessage(`打开终端失败：${e instanceof Error ? e.message : String(e)}`, 4000)
       );
     });
@@ -2816,7 +2657,7 @@ function bindInteractions(): void {
     button.addEventListener("click", () => {
       const path = button.dataset.openTerminal;
       if (!path) return;
-      void invoke("open_terminal_at", { path }).catch((e) =>
+      void api.openTerminalAt(path).catch((e) =>
         setSkillActionMessage(`打开终端失败：${e instanceof Error ? e.message : String(e)}`, 4000)
       );
     });
@@ -2826,7 +2667,7 @@ function bindInteractions(): void {
       const clientId = button.dataset.launchProject;
       const projectPath = button.dataset.projectPath;
       if (!clientId || !projectPath) return;
-      void invoke("launch_client_in_project", { projectPath, clientId }).catch((e) =>
+      void api.launchClientInProject(projectPath, clientId).catch((e) =>
         setSkillActionMessage(`启动失败：${e instanceof Error ? e.message : String(e)}`, 4000)
       );
     });
@@ -2838,7 +2679,7 @@ function bindInteractions(): void {
       button.textContent = "启动中...";
       button.disabled = true;
       try {
-        await invoke("launch_client", { clientId });
+        await api.launchClient(clientId);
         button.textContent = "已启动";
       } catch (error) {
         button.textContent = "启动失败";
@@ -2942,7 +2783,7 @@ function bindInteractions(): void {
       const target = button.dataset.openPath;
       if (!target) return;
       try {
-        await invoke("open_path", { target });
+        await api.openPath(target);
       } catch (error) {
         setSkillActionMessage(`打开失败：${error instanceof Error ? error.message : String(error)}`, 4200);
       }

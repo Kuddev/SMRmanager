@@ -152,6 +152,8 @@ export type InstallResult = {
   installedPath?: string | null;
 };
 
+export type LibraryOpResult = { ok: number; failed: string[]; message: string };
+
 export type DeleteSkillsResult = {
   deleted: number;
   movedToTrash: string[];
