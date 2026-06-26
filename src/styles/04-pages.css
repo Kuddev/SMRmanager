@@ -1399,7 +1399,7 @@
 .context-target-list {
   display: grid;
   gap: 6px;
-  max-height: min(250px, calc(100vh - 178px));
+  max-height: min(212px, calc(100vh - 178px));
   overflow-y: auto;
   padding-right: 3px;
   scrollbar-width: thin;
@@ -1451,7 +1451,8 @@
   font-size: 11px;
 }
 
-.skill-context-action {
+.skill-context-action,
+.rule-context-action {
   height: 28px;
   border: 1px solid rgba(45, 212, 191, 0.24);
   border-radius: 8px;
@@ -1459,9 +1460,11 @@
   background: rgba(20, 184, 166, 0.1);
   font-size: 12px;
   font-weight: 900;
+  cursor: pointer;
 }
 
-.skill-context-action.move {
+.skill-context-action.move,
+.rule-context-action.move {
   color: #7c3aed;
   border-color: rgba(124, 58, 237, 0.24);
   background: rgba(124, 58, 237, 0.1);
@@ -1799,6 +1802,125 @@
   font-size: 10px;
   line-height: 1.45;
   white-space: pre-wrap;
+}
+
+/* —— 项目管理页（项目作用域）—— */
+.project-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+}
+
+.wsl-instance-card.project-card {
+  position: relative;
+}
+
+.project-card-path {
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.project-card-remove {
+  position: absolute;
+  top: 8px;
+  right: 40px;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.wsl-instance-card.project-card:hover .project-card-remove {
+  opacity: 1;
+}
+
+.project-card-remove:hover {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.14);
+}
+
+.project-current-path {
+  padding: 4px 12px 8px;
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proj-filter-row {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0 12px;
+  flex-wrap: wrap;
+}
+
+.proj-filter-chip {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--control-bg);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.proj-filter-chip.is-active {
+  color: #fff;
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.panel-subtle {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.skill-updated {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.skill-toggle {
+  cursor: pointer;
+  border: none;
+}
+
+.project-skill-row {
+  align-items: center;
+}
+
+.project-skill-row.is-disabled {
+  opacity: 0.62;
+}
+
+/* 添加 Skill 弹框：覆盖 alert-dialog 的「54px 图标列 + 内容列」两列 grid（本弹框无图标，否则内容被挤成竖排）。*/
+.project-add-skill-dialog {
+  display: block;
+  width: min(440px, 92vw);
+  border-color: var(--line-strong);
+  background: var(--card-bg);
+}
+
+.add-skill-list {
+  margin-top: 12px;
 }
 
 }

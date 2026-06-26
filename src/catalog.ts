@@ -2,7 +2,8 @@
 import type { Client, MarketSkill, MarketMcp } from "./types";
 
 export const navItems = [
-  ["客户端", "client", "clients"],
+  ["全局", "client", "clients"],
+  ["项目", "project", "project"],
   ["Skills 管理", "skills", "skills"],
   ["WSL 管理", "wsl", "wsl"],
   ["MCP 管理", "mcp", "mcp"],

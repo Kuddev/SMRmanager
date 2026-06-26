@@ -1,6 +1,6 @@
 // 全局类型定义（从 main.ts 抽出）。
 
-export type ViewName = "clients" | "skills" | "wsl" | "mcp" | "rules" | "market" | "settings";
+export type ViewName = "clients" | "project" | "skills" | "wsl" | "mcp" | "rules" | "market" | "settings";
 export type ClientTab = "skills" | "mcp" | "rules" | "settings";
 export type ThemeName = "light" | "dark";
 export type ThemeMode = "light" | "dark" | "system";
@@ -37,7 +37,9 @@ export type RuntimeClient = {
   rootLabel?: string | null;
 };
 
-export type ScanRoot = { tag: string; label: string; path: string; kind: "wsl" | "custom" };
+export type ScanRoot = { tag: string; label: string; path: string; kind: "wsl" | "custom" | "project" };
+// 用户注册的项目目录（项目作用域）。tag 由 path 派生，用于客户端 id 后缀 @proj-<id>。
+export type ProjectEntry = { id: string; label: string; path: string };
 export type WslDistro = { distro: string; user: string; homeUnc: string; running: boolean; isDefault: boolean };
 export type GitSkillEntry = { relPath: string; name: string; description: string };
 export type GitMcpEntry = { name: string; transport: string; command?: string | null; args?: string[] | null; url?: string | null };
@@ -69,6 +71,7 @@ export type RuntimeSkill = {
   tags?: string[];
   linked?: boolean;
   linkedClients?: string[];
+  enabled?: boolean;
 };
 
 export type SkillGroup = {

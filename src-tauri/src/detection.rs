@@ -74,6 +74,8 @@ pub struct DetectedSkill {
     pub tags: Vec<String>,
     pub linked: bool,
     pub linked_clients: Vec<String>,
+    // 项目级 Skill 的启用/禁用状态；全局/WSL Skill 恒为 true。禁用 = 移入项目私有禁用区。
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -503,6 +505,99 @@ fn client_definitions() -> Vec<ClientDefinition> {
     build_definitions(&home_dir())
 }
 
+/// 项目级路径布局：返回某客户端在「项目根目录」下的 (skill_dirs, rule_paths, config_candidates)。
+/// 与 home 布局（~/.claude/skills）不同——项目级是 <proj>/.claude/skills、<proj>/AGENTS.md、<proj>/.mcp.json 等。
+/// 没有项目级约定的客户端（claude-desktop / zcode / workbuddy / qoderworkcn）返回空，计数为 0。
+fn project_layout(id: &str, root: &Path) -> (Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>) {
+    let agents = root.join("AGENTS.md");
+    match id {
+        "claude" => (
+            vec![root.join(".claude").join("skills")],
+            vec![
+                root.join("CLAUDE.md"),
+                root.join(".claude").join("CLAUDE.md"),
+                root.join(".claude").join("rules"),
+            ],
+            vec![
+                root.join(".mcp.json"),
+                root.join(".claude").join("settings.json"),
+                root.join(".claude").join("settings.local.json"),
+            ],
+        ),
+        "codex" => (
+            vec![root.join(".codex").join("skills")],
+            vec![agents.clone(), root.join(".codex").join("AGENTS.md")],
+            vec![root.join(".codex").join("config.toml")],
+        ),
+        "gemini" => (
+            vec![root.join(".gemini").join("skills")],
+            vec![root.join("GEMINI.md"), root.join(".gemini").join("rules")],
+            vec![root.join(".gemini").join("settings.json")],
+        ),
+        "cursor" => (
+            vec![root.join(".cursor").join("skills")],
+            vec![root.join(".cursor").join("rules"), root.join(".cursorrules")],
+            vec![root.join(".cursor").join("mcp.json")],
+        ),
+        "vscode" => (
+            vec![],
+            vec![root.join(".github").join("copilot-instructions.md")],
+            vec![root.join(".vscode").join("mcp.json")],
+        ),
+        "opencode" => (
+            vec![root.join(".opencode").join("skills")],
+            vec![agents.clone(), root.join(".opencode").join("rules")],
+            vec![root.join("opencode.json"), root.join(".opencode").join("opencode.json")],
+        ),
+        "openclaw" => (
+            vec![root.join(".openclaw").join("skills")],
+            vec![agents.clone(), root.join(".openclaw").join("rules")],
+            vec![root.join(".openclaw").join("openclaw.json")],
+        ),
+        "hermes" => (
+            vec![root.join(".hermes").join("skills")],
+            vec![agents.clone(), root.join(".hermes").join("rules")],
+            vec![root.join(".hermes").join("config.yaml")],
+        ),
+        "trae" => (
+            vec![root.join(".trae").join("skills")],
+            vec![agents, root.join(".trae").join("rules")],
+            vec![root.join(".trae").join("mcp.json")],
+        ),
+        _ => (vec![], vec![], vec![]),
+    }
+}
+
+/// 把全部客户端定义重写为「项目级」布局（exe 不参与项目级检测）。
+fn build_project_definitions(root: &Path) -> Vec<ClientDefinition> {
+    build_definitions(root)
+        .into_iter()
+        .map(|mut def| {
+            let (skills, rules, configs) = project_layout(&def.id, root);
+            def.skill_dirs = skills;
+            def.rule_paths = rules;
+            def.config_candidates = configs;
+            def.exe_names = &[];
+            def.exe_candidates = vec![];
+            def.source = "project".into();
+            def
+        })
+        .collect()
+}
+
+/// 为单个项目根生成带 @tag 的项目级客户端定义（id 形如 claude@proj-xxx）。
+fn definitions_for_project_root(root: &ExtraRoot) -> Vec<ClientDefinition> {
+    build_project_definitions(Path::new(&root.path))
+        .into_iter()
+        .map(|mut def| {
+            def.id = format!("{}@{}", def.id, root.tag);
+            def.name = format!("{}（{}）", def.name, root.label);
+            def.root_label = Some(root.label.clone());
+            def
+        })
+        .collect()
+}
+
 /// 扩展扫描根（如 WSL 的 UNC 路径或任意自定义 home 目录）。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -536,7 +631,12 @@ fn definitions_for_extra_root(root: &ExtraRoot) -> Vec<ClientDefinition> {
 fn definitions_with_extra_roots(extra_roots: &[ExtraRoot]) -> Vec<ClientDefinition> {
     let mut defs = client_definitions();
     for root in extra_roots {
-        defs.extend(definitions_for_extra_root(root));
+        // 项目根用项目级布局（.claude/skills、AGENTS.md…）；WSL/自定义根复用 home 布局（换 root）。
+        if root.kind == "project" {
+            defs.extend(definitions_for_project_root(root));
+        } else {
+            defs.extend(definitions_for_extra_root(root));
+        }
     }
     defs
 }
@@ -907,6 +1007,7 @@ fn extract_skill(
     client_id: &str,
     client_name: &str,
     managed: bool,
+    enabled: bool,
 ) -> Option<DetectedSkill> {
     let skill_md = path.join("SKILL.md");
     if !skill_md.is_file() {
@@ -926,10 +1027,11 @@ fn extract_skill(
         tags,
         linked: false,
         linked_clients: Vec::new(),
+        enabled,
     })
 }
 
-fn scan_skill_dir(dir: &Path, client_id: &str, client_name: &str, managed: bool) -> Vec<DetectedSkill> {
+fn scan_skill_dir(dir: &Path, client_id: &str, client_name: &str, managed: bool, enabled: bool) -> Vec<DetectedSkill> {
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir(dir) else {
         return out;
@@ -944,7 +1046,7 @@ fn scan_skill_dir(dir: &Path, client_id: &str, client_name: &str, managed: bool)
         if dir_name.starts_with('.') {
             continue;
         }
-        if let Some(skill) = extract_skill(&path, dir_name, client_id, client_name, managed) {
+        if let Some(skill) = extract_skill(&path, dir_name, client_id, client_name, managed, enabled) {
             out.push(skill);
         }
     }
@@ -957,7 +1059,7 @@ fn collect_skills(definitions: &[ClientDefinition]) -> Vec<DetectedSkill> {
     let mut seen_paths: BTreeSet<PathBuf> = BTreeSet::new();
 
     // 1. 中心库（单一真相源）
-    let mut library_skills = scan_skill_dir(&library_skills_dir(), "library", "中心库", true);
+    let mut library_skills = scan_skill_dir(&library_skills_dir(), "library", "中心库", true, true);
     let mut lib_index: BTreeMap<PathBuf, usize> = BTreeMap::new();
     for (idx, skill) in library_skills.iter().enumerate() {
         let canon = canonical_or_original(Path::new(&skill.path));
@@ -991,7 +1093,7 @@ fn collect_skills(definitions: &[ClientDefinition]) -> Vec<DetectedSkill> {
                         continue;
                     }
                 }
-                if let Some(skill) = extract_skill(&path, dir_name, &definition.id, &definition.name, false) {
+                if let Some(skill) = extract_skill(&path, dir_name, &definition.id, &definition.name, false, true) {
                     if seen_paths.insert(canonical_or_original(&path)) {
                         client_skills.push(skill);
                     }
@@ -1002,7 +1104,7 @@ fn collect_skills(definitions: &[ClientDefinition]) -> Vec<DetectedSkill> {
 
     // 3. extra_skill_roots（通用 skill 目录，如 .agents）
     for dir in extra_skill_roots() {
-        for skill in scan_skill_dir(&dir, "shared", "共享 Skills", true) {
+        for skill in scan_skill_dir(&dir, "shared", "共享 Skills", true, true) {
             if seen_paths.insert(canonical_or_original(Path::new(&skill.path))) {
                 client_skills.push(skill);
             }
@@ -1013,6 +1115,29 @@ fn collect_skills(definitions: &[ClientDefinition]) -> Vec<DetectedSkill> {
     let mut skills = library_skills;
     skills.extend(client_skills);
     skills
+}
+
+/// 扫描项目私有禁用区 <proj>/.smrmanager/disabled/<baseClientId>/<name>，标 enabled=false。
+/// 启用区的项目 Skill 由 collect_skills 正常扫到（enabled=true）。
+fn collect_project_disabled_skills(extra_roots: &[ExtraRoot]) -> Vec<DetectedSkill> {
+    let mut out = Vec::new();
+    for root in extra_roots {
+        if root.kind != "project" {
+            continue;
+        }
+        let base = Path::new(&root.path);
+        for def in build_project_definitions(base) {
+            // 仅对「有项目级 skill 目录」的客户端维护禁用区。
+            if def.skill_dirs.is_empty() {
+                continue;
+            }
+            let disabled_dir = base.join(".smrmanager").join("disabled").join(&def.id);
+            let tagged_id = format!("{}@{}", def.id, root.tag);
+            let tagged_name = format!("{}（{}）", def.name, root.label);
+            out.extend(scan_skill_dir(&disabled_dir, &tagged_id, &tagged_name, false, false));
+        }
+    }
+    out
 }
 
 fn is_rule_file(path: &Path) -> bool {
@@ -1207,7 +1332,9 @@ fn collect_rules(definitions: &[ClientDefinition]) -> Vec<DetectedRule> {
 pub fn detect_environment(extra_roots: Vec<ExtraRoot>) -> DetectionSnapshot {
     let definitions = definitions_with_extra_roots(&extra_roots);
     let mut all_mcp = Vec::new();
-    let all_skills = collect_skills(&definitions);
+    let mut all_skills = collect_skills(&definitions);
+    // 项目级禁用区里的 Skill（enabled=false），并入以便计数与展示。
+    all_skills.extend(collect_project_disabled_skills(&extra_roots));
     let all_rules = collect_rules(&definitions);
     let mut skills_by_client: BTreeMap<String, usize> = BTreeMap::new();
     for skill in &all_skills {
@@ -1536,6 +1663,61 @@ pub fn wsl_open_terminal(distro: String) -> Result<(), String> {
         .args(["/c", "start", "", "wsl.exe", "-d", &distro])
         .spawn()
         .map_err(|e| format!("打开终端失败: {e}"))?;
+    Ok(())
+}
+
+/// 在项目目录打开「终端」（Windows Terminal 优先），即右键菜单"在终端中打开"的形式。
+#[tauri::command(rename_all = "camelCase")]
+pub fn open_terminal_at(path: String) -> Result<(), String> {
+    let dir = PathBuf::from(&path);
+    if !dir.is_dir() {
+        return Err(format!("目录不存在: {path}"));
+    }
+    // 优先 Windows Terminal（wt -d 直接在指定目录开一个标签）；回退到 cmd start 并 cd 到该目录。
+    if Command::new("wt.exe").args(["-d", &path]).spawn().is_ok() {
+        return Ok(());
+    }
+    Command::new("cmd")
+        .args(["/c", "start", "", "cmd", "/k", "cd", "/d", &path])
+        .spawn()
+        .map_err(|e| format!("打开终端失败: {e}"))?;
+    Ok(())
+}
+
+/// 在项目目录启动客户端 CLI（Windows Terminal 内、以项目目录为工作目录运行 claude/codex/… ）；
+/// 非 CLI 客户端回退为仅打开终端。
+#[tauri::command(rename_all = "camelCase")]
+pub fn launch_client_in_project(project_path: String, client_id: String) -> Result<(), String> {
+    let dir = PathBuf::from(&project_path);
+    if !dir.is_dir() {
+        return Err(format!("目录不存在: {project_path}"));
+    }
+    let base_id = client_id.split('@').next().unwrap_or(client_id.as_str());
+    let cli = match base_id {
+        "claude" => Some("claude"),
+        "codex" => Some("codex"),
+        "gemini" => Some("gemini"),
+        "opencode" => Some("opencode"),
+        "openclaw" => Some("openclaw"),
+        "hermes" => Some("hermes"),
+        _ => None,
+    };
+    let Some(cmd) = cli else {
+        // 非 CLI 客户端（IDE/桌面/工作台）：仅在项目目录打开终端。
+        return open_terminal_at(project_path);
+    };
+    // 优先 Windows Terminal：-d 设工作目录为项目目录，cmd /k 保留窗口便于交互与查看输出。
+    if Command::new("wt.exe")
+        .args(["-d", project_path.as_str(), "cmd", "/k", cmd])
+        .spawn()
+        .is_ok()
+    {
+        return Ok(());
+    }
+    Command::new("cmd")
+        .args(["/c", "start", "", "cmd", "/k", &format!("cd /d \"{project_path}\" && {cmd}")])
+        .spawn()
+        .map_err(|e| format!("启动失败: {e}"))?;
     Ok(())
 }
 
@@ -1936,6 +2118,63 @@ pub fn delete_skills(paths: Vec<String>) -> Result<DeleteSkillsResult, String> {
         failed,
         message: format!("已删除 {deleted} 个 Skill（已移动到 SMRmanager 回收目录）"),
     })
+}
+
+/// 项目级 Skill 启用/禁用：在启用区 <proj>/<skillRoot>/<name> 与禁用区
+/// <proj>/.smrmanager/disabled/<baseClientId>/<name> 之间移动目录（可逆、对客户端透明）。
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_project_skill_enabled(
+    project_path: String,
+    client_id: String,
+    skill_dir: String,
+    enabled: bool,
+) -> Result<String, String> {
+    let root = PathBuf::from(&project_path);
+    if !root.is_dir() {
+        return Err("项目目录不存在".to_string());
+    }
+
+    let name = skill_dir.trim();
+    if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err("非法的 Skill 目录名".to_string());
+    }
+
+    // client_id 形如 claude@proj-xxx，取 @ 前的基础 id 定位项目级 skill 根。
+    let base_id = client_id.split('@').next().unwrap_or(client_id.as_str());
+    let def = build_project_definitions(&root)
+        .into_iter()
+        .find(|d| d.id == base_id)
+        .ok_or_else(|| format!("未知客户端: {client_id}"))?;
+    let enabled_root = def
+        .skill_dirs
+        .first()
+        .cloned()
+        .ok_or_else(|| format!("{} 在项目级没有 Skills 目录", def.name))?;
+    let disabled_root = root.join(".smrmanager").join("disabled").join(base_id);
+
+    if enabled {
+        let from = disabled_root.join(name);
+        let to = enabled_root.join(name);
+        if !from.is_dir() {
+            return Err("未找到被禁用的 Skill".to_string());
+        }
+        if to.exists() {
+            return Err("启用区已存在同名 Skill".to_string());
+        }
+        move_dir_to_trash(&from, &to)?;
+        Ok(format!("已启用 {name}"))
+    } else {
+        let from = enabled_root.join(name);
+        let to = disabled_root.join(name);
+        if !from.is_dir() {
+            return Err("未找到该 Skill".to_string());
+        }
+        if to.exists() {
+            return Err("禁用区已存在同名 Skill".to_string());
+        }
+        move_dir_to_trash(&from, &to)?;
+        Ok(format!("已禁用 {name}"))
+    }
 }
 
 /// 客户端可写入 Rule 的目录：优先 rule_paths 中的目录型（无扩展名），否则取首个路径的父目录。

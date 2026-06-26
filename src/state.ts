@@ -7,6 +7,7 @@ import type {
   ThemeName,
   ThemeMode,
   ScanRoot,
+  ProjectEntry,
   WslDistro,
   GitInstallDialogState,
   SkillGroup,
@@ -28,6 +29,7 @@ export const dismissedUpdateStorageKey = "smrmanager-update-dismissed-version";
 const skillGroupsStorageKey = "smrmanager-skill-groups";
 const scanRootsStorageKey = "smrmanager-scan-roots";
 const clientOrderStorageKey = "smrmanager-client-order";
+const projectsStorageKey = "smrmanager-projects";
 
 export function readStoredThemeMode(): ThemeMode {
   const stored = localStorage.getItem(themeStorageKey);
@@ -96,6 +98,26 @@ export function loadClientOrder(): string[] {
   }
 }
 
+export function loadProjects(): ProjectEntry[] {
+  try {
+    const raw = localStorage.getItem(projectsStorageKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (item): item is ProjectEntry =>
+          Boolean(item) &&
+          typeof item.id === "string" &&
+          typeof item.label === "string" &&
+          typeof item.path === "string"
+      )
+      .map((item) => ({ id: item.id, label: item.label, path: item.path }));
+  } catch {
+    return [];
+  }
+}
+
 export const hotState = import.meta.hot?.data as HotState | undefined;
 const hotView = hotState?.currentView as ViewName | "roles" | undefined;
 const initialThemeMode: ThemeMode = hotState?.themeMode ?? readStoredThemeMode();
@@ -136,6 +158,11 @@ export type AppState = {
   skillGroups: SkillGroup[];
   scanRoots: ScanRoot[];
   clientOrder: string[];
+  projects: ProjectEntry[];
+  activeProjectId: string;
+  activeProjectClientId: string;
+  projectSkillFilter: "all" | "enabled" | "disabled";
+  projectAddSkillDialog: { clientId: string } | null;
   wslDistros: WslDistro[];
   wslDetecting: boolean;
   wslDetectError: string | null;
@@ -195,6 +222,11 @@ export const state: AppState = {
   skillGroups: loadSkillGroups(),
   scanRoots: loadScanRoots(),
   clientOrder: loadClientOrder(),
+  projects: loadProjects(),
+  activeProjectId: "",
+  activeProjectClientId: "",
+  projectSkillFilter: "all",
+  projectAddSkillDialog: null,
   wslDistros: [],
   wslDetecting: false,
   wslDetectError: null,
@@ -237,6 +269,14 @@ export function saveScanRoots(): void {
 export function saveClientOrder(): void {
   try {
     localStorage.setItem(clientOrderStorageKey, JSON.stringify(state.clientOrder));
+  } catch {
+    // 持久化失败忽略。
+  }
+}
+
+export function saveProjects(): void {
+  try {
+    localStorage.setItem(projectsStorageKey, JSON.stringify(state.projects));
   } catch {
     // 持久化失败忽略。
   }

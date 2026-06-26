@@ -63,6 +63,7 @@ import {
   saveSkillGroups,
   saveScanRoots,
   saveClientOrder,
+  saveProjects,
   themeStorageKey,
   dismissedUpdateStorageKey
 } from "./state";
@@ -170,7 +171,7 @@ function displayClients(): Client[] {
     return {
       id: rt.id,
       name: rt.name,
-      type: rt.source === "wsl" ? "WSL 客户端" : "扩展目录",
+      type: rt.source === "wsl" ? "WSL 客户端" : rt.source === "project" ? "项目客户端" : "扩展目录",
       fallbackPath: rt.detectedConfigPaths[0] ?? "",
       description: rt.description,
       iconFile: base?.iconFile ?? "/client-icons/claude.svg",
@@ -256,12 +257,22 @@ function visibleUpdateAvailable(): boolean {
   return Boolean(state.updateInfo?.available && state.updateInfo.latestVersion && !isUpdateDismissed());
 }
 
+// 已注册项目转成 kind:"project" 的扫描根；后端据此用项目级布局（.claude/skills、AGENTS.md…）扫描。
+function projectRoots(): ScanRoot[] {
+  return state.projects.map((p): ScanRoot => ({ tag: `proj-${p.id}`, label: p.label, path: p.path, kind: "project" }));
+}
+
+// 传给后端 detect_environment / transfer 的全部扩展根：WSL/自定义 + 项目。
+function allExtraRoots(): ScanRoot[] {
+  return [...state.scanRoots, ...projectRoots()];
+}
+
 async function loadEnvironment(force = false): Promise<void> {
   if (state.detectionLoading && !force) return;
   state.detectionLoading = true;
-  renderApp();
+  renderApp(true);
   try {
-    state.environment = await invoke<DetectionSnapshot>("detect_environment", { extraRoots: state.scanRoots });
+    state.environment = await invoke<DetectionSnapshot>("detect_environment", { extraRoots: allExtraRoots() });
     state.detectionError = null;
     const list = displayClients();
     const selected = list[state.activeClientIndex] ?? list[0];
@@ -271,7 +282,7 @@ async function loadEnvironment(force = false): Promise<void> {
     state.detectionError = error instanceof Error ? error.message : String(error);
   } finally {
     state.detectionLoading = false;
-    renderApp();
+    renderApp(true);
   }
 }
 
@@ -584,7 +595,7 @@ async function adoptToLibrary(paths: string[]): Promise<void> {
   state.skillTransferBusy = true;
   setSkillActionMessage(`正在收编 ${unique.length} 个 Skill 进中心库...`, 0);
   try {
-    const result = await invoke<LibraryOpResult>("adopt_skills_to_library", { paths: unique, extraRoots: state.scanRoots });
+    const result = await invoke<LibraryOpResult>("adopt_skills_to_library", { paths: unique, extraRoots: allExtraRoots() });
     state.skillTransferBusy = false;
     state.selectedSkillKeys.clear();
     await loadEnvironment(true);
@@ -641,7 +652,7 @@ async function transferSkills(paths: string[], targetClientId: string, action: S
       paths: uniquePaths,
       targetClientId,
       action,
-      extraRoots: state.scanRoots
+      extraRoots: allExtraRoots()
     });
     const done = action === "move" ? result.moved : result.copied;
     const failedText = result.failed.length ? `；失败 ${result.failed.length} 个：${result.failed.join(" / ")}` : "";
@@ -869,7 +880,7 @@ async function deleteClientConfig(clientId: string): Promise<void> {
 }
 
 function navIcon(name: string): string {
-  const map: Record<string, string> = { client: "▣", skills: "✦", wsl: "🐧", mcp: "◎", rules: "♙", market: "⌂", settings: "⚙" };
+  const map: Record<string, string> = { client: "▣", project: "❏", skills: "✦", wsl: "🐧", mcp: "◎", rules: "♙", market: "⌂", settings: "⚙" };
   return map[name] ?? "▣";
 }
 
@@ -883,7 +894,7 @@ function renderSidebar(): string {
   const nav = navItems
     .map(([label, icon, view]) => `
       <button class="nav-item ${view === state.currentView ? "is-active" : ""}" data-view="${view}" type="button">
-        <span class="nav-icon">${navIcon(icon)}</span><span>${label}</span>${view === "wsl" ? `<span class="nav-beta">Beta</span>` : ""}
+        <span class="nav-icon">${navIcon(icon)}</span><span>${label}</span>${view === "wsl" || view === "project" ? `<span class="nav-beta">Beta</span>` : ""}
       </button>`)
     .join("");
   const updateReminder = visibleUpdateAvailable()
@@ -1068,22 +1079,31 @@ function renderClientMain(client: Client): string {
   const mcps = clientMcps(client.id);
   const skills = clientSkills(client.id);
   const rules = clientRules(client.id);
+  const isProject = client.id.includes("@proj-");
   const tabContent =
     state.activeClientTab === "skills"
-      ? renderClientSkillsPanel(client, skills)
+      ? isProject
+        ? renderProjectSkillsPanel(client, skills)
+        : renderClientSkillsPanel(client, skills)
       : state.activeClientTab === "mcp"
         ? renderClientMcpPanel(mcps)
         : state.activeClientTab === "rules"
           ? renderClientRulesPanel(client, rules)
           : renderClientSettingsPanel(client, rt);
+  const projectPath = isProject
+    ? state.projects.find((p) => client.id.endsWith(`@proj-${p.id}`))?.path ?? ""
+    : "";
+  const heroButton = isProject
+    ? `<button class="primary-button" data-launch-project="${html(client.id)}" data-project-path="${html(projectPath)}" type="button">▶ 启动</button><button class="secondary-button" data-open-terminal="${html(projectPath)}" type="button">⌘ 终端</button>`
+    : `<button class="primary-button launch-client-button" data-client-id="${html(client.id)}" type="button" ${canLaunch ? "" : "disabled"}>${canLaunch ? "▶ 启动客户端" : installed ? "未找到启动程序" : "需要安装客户端"}</button>`;
   return `
     <section class="client-main-card">
       <div class="client-hero">
         <div class="hero-left">
           <span class="avatar large image">${img(client.iconFile, client.name)}</span>
-          <div><h2>${html(client.name)}</h2></div>
+          <div><h2>${html(isProject ? baseClientName(client) : client.name)}</h2></div>
         </div>
-        <div class="hero-actions"><button class="primary-button launch-client-button" data-client-id="${html(client.id)}" type="button" ${canLaunch ? "" : "disabled"}>${canLaunch ? "▶ 启动客户端" : installed ? "未找到启动程序" : "需要安装客户端"}</button>${clientMenuHtml}</div>
+        <div class="hero-actions">${heroButton}${clientMenuHtml}</div>
       </div>
       ${
         !installed
@@ -1287,6 +1307,277 @@ function renderWslClientInspector(): string {
     return `<aside class="inspector"><section class="info-card"><h3>客户端信息</h3><p class="placeholder-copy">选择左侧的 CLI 客户端查看详情。</p></section></aside>`;
   }
   return renderInspector(client);
+}
+
+// —— 项目独立管理页（项目作用域；结构同 WSL：项目列表 → 进入后按客户端管理）——
+function projectIdFromPath(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const base =
+    (trimmed.split(/[\\/]/).pop() || "project").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "project";
+  let hash = 0;
+  for (let i = 0; i < path.length; i++) hash = (hash * 31 + path.charCodeAt(i)) >>> 0;
+  return `${base}-${hash.toString(36)}`;
+}
+
+function projectLabelFromPath(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  return trimmed.split(/[\\/]/).pop() || trimmed || "项目";
+}
+
+// 某项目下检测到的客户端（id 形如 claude@proj-<id>）。
+function projectClients(projectId: string): Client[] {
+  const suffix = `@proj-${projectId}`;
+  return displayClients().filter((client) => client.id.endsWith(suffix));
+}
+
+// 去掉项目客户端名里的「（项目名）」后缀，列表只显示纯客户端名。
+function baseClientName(client: Client): string {
+  const baseId = client.id.split("@")[0];
+  return clients.find((b) => b.id === baseId)?.name ?? client.name;
+}
+
+async function addProject(): Promise<void> {
+  const picked = await openDialog({ directory: true, multiple: false, title: "选择项目目录" });
+  if (typeof picked !== "string" || !picked.trim()) return;
+  const path = picked.trim();
+  if (state.projects.some((p) => p.path.toLowerCase() === path.toLowerCase())) {
+    setSkillActionMessage("该项目已添加", 2400);
+    return;
+  }
+  const id = projectIdFromPath(path);
+  state.projects = [...state.projects, { id, label: projectLabelFromPath(path), path }];
+  saveProjects();
+  state.activeProjectId = id;
+  state.activeProjectClientId = "";
+  await loadEnvironment(true);
+  renderApp(true);
+}
+
+function removeProject(id: string): void {
+  state.projects = state.projects.filter((p) => p.id !== id);
+  saveProjects();
+  if (state.activeProjectId === id) {
+    state.activeProjectId = "";
+    state.activeProjectClientId = "";
+  }
+  void loadEnvironment(true);
+  renderApp(true);
+}
+
+function selectProject(id: string): void {
+  state.activeProjectId = id;
+  state.activeClientTab = "skills";
+  state.activeProjectClientId = projectClients(id)[0]?.id ?? "";
+  renderApp(true);
+}
+
+function backToProjects(): void {
+  state.activeProjectId = "";
+  state.activeProjectClientId = "";
+  renderApp(true);
+}
+
+// 项目级 Skill 启停：乐观更新——先本地翻转 enabled 并就地重渲染（配合稳定排序，位置不变、无 loading 抖动），再后台落盘；失败回滚。
+async function setProjectSkillEnabled(clientId: string, skillDir: string, enabled: boolean): Promise<void> {
+  const projectId = clientId.split("@proj-")[1] ?? "";
+  const project = state.projects.find((p) => p.id === projectId);
+  if (!project) {
+    setSkillActionMessage("未找到对应项目", 3000);
+    return;
+  }
+  const skill = state.environment?.skills.find((s) => s.clientId === clientId && s.directory === skillDir);
+  if (skill) skill.enabled = enabled;
+  renderApp(true);
+  try {
+    const msg = await invoke<string>("set_project_skill_enabled", {
+      projectPath: project.path,
+      clientId,
+      skillDir,
+      enabled
+    });
+    setSkillActionMessage(msg, 2000);
+  } catch (error) {
+    if (skill) skill.enabled = !enabled;
+    renderApp(true);
+    setSkillActionMessage(`操作失败：${error instanceof Error ? error.message : String(error)}`, 4200);
+  }
+}
+
+function renderProjectView(): string {
+  // L1：未进入项目时显示项目列表；L2：进入后按客户端分类（复用主页客户端三栏布局）。
+  if (!state.activeProjectId) {
+    return `<main class="workspace single-column-workspace">${renderProjectLanding()}</main>`;
+  }
+  return `<main class="workspace"><div class="dashboard-grid">${renderProjectClientColumn()}${renderProjectClientMain()}${renderProjectClientInspector()}</div></main>`;
+}
+
+function renderProjectLanding(): string {
+  const cards = state.projects
+    .map((p) => {
+      const list = projectClients(p.id);
+      const installed = list.filter((c) => runtime(c)?.installed).length;
+      const skillCount = list.reduce((sum, c) => sum + (runtime(c)?.skillsCount ?? 0), 0);
+      return `<button class="wsl-instance-card project-card" data-project-id="${html(p.id)}" type="button">
+        <span class="wsl-instance-icon">❏</span>
+        <div class="wsl-instance-meta">
+          <strong>${html(p.label)}</strong>
+          <small class="project-card-path">${html(p.path)}</small>
+          <small>${installed} 个客户端 · ${skillCount} Skills</small>
+        </div>
+        <span class="project-card-remove" data-remove-project="${html(p.id)}" role="button" title="移除项目">×</span>
+        <span class="wsl-enter-arrow">${svgIcon("chevron-right", 18)}</span>
+      </button>`;
+    })
+    .join("");
+  return `<section class="client-main-card management-card skills-page-card">
+    <div class="skills-page-hero">
+      <div class="hero-left"><span class="avatar large project-avatar">❏</span><div><h2>项目管理</h2><p>注册项目目录，按客户端管理每个项目下的 Skills / MCP / Rules（项目级配置，仅对该项目生效）。</p></div></div>
+      <div class="skills-hero-actions"><button class="primary-button" data-add-project="1" type="button">+ 添加项目</button></div>
+    </div>
+    <div class="wsl-instance-grid">${cards || `<div class="empty-config-panel">尚未添加项目。点击「添加项目」选择一个项目目录开始管理。</div>`}</div>
+  </section>`;
+}
+
+function renderProjectClientColumn(): string {
+  const project = state.projects.find((p) => p.id === state.activeProjectId);
+  const list = projectClients(state.activeProjectId);
+  if (!list.some((client) => client.id === state.activeProjectClientId)) {
+    state.activeProjectClientId = list[0]?.id ?? "";
+  }
+  const rows = list
+    .map((client) => {
+      const rt = runtime(client);
+      const installed = rt?.installed ?? false;
+      const active = client.id === state.activeProjectClientId;
+      return `<button class="client-row ${active ? "is-selected" : ""} ${installed ? "is-installed" : "is-missing"}" data-project-client="${html(client.id)}" type="button">
+        <span class="avatar mini image">${img(client.iconFile, client.name)}</span>
+        <span class="client-row-copy"><strong>${html(baseClientName(client))}</strong><small>${installed ? `${rt?.mcpCount ?? 0} MCP / ${rt?.skillsCount ?? 0} Skills` : "未安装"}</small></span>
+        <span class="client-status-dot ${installed ? "installed" : "missing"}"></span>
+      </button>`;
+    })
+    .join("");
+  return `<section class="client-list-card">
+    <button class="wsl-back-button" data-project-back="1" type="button">${svgIcon("chevron-left", 15)}<span>全部项目</span></button>
+    <div class="list-heading"><strong>全部客户端</strong><span>${list.length}</span></div>
+    ${project ? `<div class="project-current-path"><code>${html(project.path)}</code></div>` : ""}
+    <div class="client-list">${rows || `<div class="empty-config-panel">检测中…或该项目无可管理客户端。</div>`}</div>
+    <button id="refresh-detection" class="text-action" type="button"><span>${svgIcon("refresh", 15)}</span>重新检测</button>
+  </section>`;
+}
+
+function renderProjectClientMain(): string {
+  const client = projectClients(state.activeProjectId).find((c) => c.id === state.activeProjectClientId);
+  const project = state.projects.find((p) => p.id === state.activeProjectId);
+  if (!client) {
+    return `<section class="client-main-card"><div class="client-hero"><div class="hero-left"><span class="avatar large project-avatar">❏</span><div><h2>${html(project?.label ?? "项目")}</h2></div></div></div><div class="empty-config-panel">该项目暂无可管理的客户端，或正在检测。</div></section>`;
+  }
+  return renderClientMain(client);
+}
+
+function renderProjectClientInspector(): string {
+  const client = projectClients(state.activeProjectId).find((c) => c.id === state.activeProjectClientId);
+  if (!client) {
+    return `<aside class="inspector"><section class="info-card"><h3>客户端信息</h3><p class="placeholder-copy">选择左侧客户端查看其在本项目下的配置。</p></section></aside>`;
+  }
+  return renderInspector(client);
+}
+
+// 项目级 Skills 面板：启用/禁用 toggle + 全部/已启用/已禁用筛选 + 添加 Skill（区别于全局只读的 renderClientSkillsPanel）。
+function renderProjectSkillsPanel(client: Client, skills: RuntimeSkill[]): string {
+  // 按目录名稳定排序：启停只改开关状态、不改条目位置，避免点击后跳动。
+  const ordered = [...skills].sort((a, b) => (a.directory || a.name).localeCompare(b.directory || b.name));
+  const enabledCount = ordered.filter((s) => s.enabled !== false).length;
+  const disabledCount = ordered.length - enabledCount;
+  const filter = state.projectSkillFilter;
+  const filtered = ordered.filter((s) =>
+    filter === "all" ? true : filter === "enabled" ? s.enabled !== false : s.enabled === false
+  );
+  const chip = (key: "all" | "enabled" | "disabled", label: string): string =>
+    `<button class="proj-filter-chip ${filter === key ? "is-active" : ""}" data-project-skill-filter="${key}" type="button">${label}</button>`;
+  return `
+    <div class="tool-section client-tab-panel">
+      <div class="section-heading-row">
+        <div><h3>项目级 Skills</h3><p class="panel-subtle">管理当前项目下可用的 Skills，配置后仅对本项目生效。</p></div>
+        <button class="primary-button" data-add-project-skill="${html(client.id)}" type="button">+ 添加 Skill</button>
+      </div>
+      <div class="proj-filter-row">
+        ${chip("all", `全部 ${ordered.length}`)}
+        ${chip("enabled", `已启用 ${enabledCount}`)}
+        ${chip("disabled", `已禁用 ${disabledCount}`)}
+      </div>
+      <div class="client-skill-stack">
+        ${
+          filtered.map(renderProjectSkillRow).join("") ||
+          `<div class="empty-config-panel">${
+            ordered.length
+              ? "没有符合筛选条件的 Skill。"
+              : `当前项目下未检测到 ${html(baseClientName(client))} 的 Skills。可点击「添加 Skill」从全局或中心库下发。`
+          }</div>`
+        }
+      </div>
+    </div>`;
+}
+
+function renderProjectSkillRow(skill: RuntimeSkill): string {
+  const enabled = skill.enabled !== false;
+  return `
+    <article class="client-skill-row project-skill-row ${enabled ? "" : "is-disabled"}" data-skill-key="${html(skillKey(skill))}" data-skill-path="${html(skill.path)}">
+      <div class="skill-row-icon ${skillTone(skill)}">${html(skillInitials(skill.name))}</div>
+      <div class="client-skill-copy">
+        <div class="skill-row-title"><strong>${html(skill.name)}</strong><span class="rule-source-pill">本地</span></div>
+        <p>${html(skillDescription(skill))}</p>
+        <div class="skill-chip-row">${skillTags(skill)
+          .map((tag) => `<span>${html(tag)}</span>`)
+          .join("")}<span class="skill-updated">更新于 ${formatUpdated(skill.updatedAt)}</span></div>
+        <code>${html(skill.path)}</code>
+      </div>
+      <button class="status-pill skill-toggle ${enabled ? "is-on" : "is-off"}" data-skill-toggle="${html(skill.directory)}" data-skill-client="${html(skill.clientId)}" data-skill-enabled="${enabled ? "1" : "0"}" type="button">${enabled ? "已启用" : "已禁用"}</button>
+    </article>`;
+}
+
+// 可下发到项目的候选 Skill：全局/中心库/共享中已检测、已启用、去重的 skill（排除项目级自身）。
+function projectAddSkillCandidates(): RuntimeSkill[] {
+  const seen = new Set<string>();
+  const out: RuntimeSkill[] = [];
+  for (const s of state.environment?.skills ?? []) {
+    if (s.clientId.includes("@proj-")) continue;
+    if (s.enabled === false) continue;
+    const key = s.path.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function renderProjectAddSkillDialog(): string {
+  const dlg = state.projectAddSkillDialog;
+  if (!dlg) return "";
+  const candidates = projectAddSkillCandidates();
+  const rows = candidates.length
+    ? candidates
+        .map(
+          (s) => `
+        <div class="context-target-row">
+          <span><strong>${html(s.name)}</strong><small>${html(s.clientName)}</small></span>
+          <button class="skill-context-action" data-add-skill-path="${html(s.path)}" type="button" ${state.skillTransferBusy ? "disabled" : ""}>添加</button>
+        </div>`
+        )
+        .join("")
+    : `<div class="context-empty">没有可下发的 Skill。请先在「全局」页或中心库准备 Skill。</div>`;
+  return `
+    <div class="alert-dialog-backdrop" role="presentation" data-add-skill-backdrop="1">
+      <section class="alert-dialog project-add-skill-dialog" role="dialog" aria-modal="true">
+        <div class="alert-dialog-copy">
+          <h2>添加 Skill 到项目</h2>
+          <p>从全局 / 中心库已检测的 Skill 中选择，复制到当前项目客户端（仅对本项目生效）。</p>
+          <div class="context-target-list add-skill-list">${rows}</div>
+        </div>
+        <div class="alert-dialog-actions">
+          <button class="secondary-button" data-close-add-skill="1" type="button">关闭</button>
+        </div>
+      </section>
+    </div>`;
 }
 
 function renderMcpView(): string {
@@ -1638,6 +1929,7 @@ function renderPlaceholder(title: string): string {
 
 function renderContent(): string {
   if (state.currentView === "clients") return renderClientView();
+  if (state.currentView === "project") return renderProjectView();
   if (state.currentView === "wsl") return renderWslView();
   if (state.currentView === "mcp") return renderMcpView();
   if (state.currentView === "skills") return renderSkillsView();
@@ -2024,14 +2316,19 @@ function ruleTargetClients(sourceClientId?: string): RuntimeClient[] {
     .sort((a, b) => (order.get(a.id) ?? 999) - (order.get(b.id) ?? 999));
 }
 
-async function copyRuleToClient(rulePath: string, targetClientId: string): Promise<void> {
+async function copyRuleToClient(rulePath: string, targetClientId: string, action: "copy" | "move" = "copy"): Promise<void> {
   closeRuleContextMenu();
   try {
     const message = await invoke<string>("copy_rule_to_client", { rulePath, targetClientId });
-    setSkillActionMessage(message, 2600);
+    if (action === "move") {
+      await invoke<DeleteSkillsResult>("delete_rules", { paths: [rulePath] });
+      setSkillActionMessage("已移动 Rule 到目标客户端", 2600);
+    } else {
+      setSkillActionMessage(message, 2600);
+    }
     await loadEnvironment(true);
   } catch (error) {
-    setSkillActionMessage(`复制失败：${error instanceof Error ? error.message : String(error)}`, 4200);
+    setSkillActionMessage(`${action === "move" ? "移动" : "复制"}失败：${error instanceof Error ? error.message : String(error)}`, 4200);
   }
 }
 
@@ -2074,7 +2371,8 @@ function renderRuleContextMenu(): string {
           (target) => `
             <div class="context-target-row">
               <span><strong>${html(target.name)}</strong><small>${html(target.type)}</small></span>
-              <button class="rule-context-action" data-target-client-id="${html(target.id)}" type="button">复制</button>
+              <button class="rule-context-action" data-action="copy" data-target-client-id="${html(target.id)}" type="button">复制</button>
+              <button class="rule-context-action move" data-action="move" data-target-client-id="${html(target.id)}" type="button">移动</button>
             </div>`
         )
         .join("")
@@ -2085,7 +2383,7 @@ function renderRuleContextMenu(): string {
       <button class="context-menu-line" id="rule-context-copy-path" data-copy-path="${html(rule.path)}" type="button">复制路径</button>
       <button class="context-menu-line is-danger" id="rule-context-delete" data-rule-path="${html(rule.path)}" type="button">删除 Rule</button>
       <div class="context-menu-divider"></div>
-      <div class="context-menu-caption">复制到已安装客户端</div>
+      <div class="context-menu-caption">复制 / 移动到已安装客户端</div>
       <div class="context-target-list">${targetRows}</div>
     </div>`;
 }
@@ -2096,7 +2394,8 @@ function bindRuleContextMenuEvents(): void {
       event.stopPropagation();
       const ctx = state.ruleContextMenu;
       if (!ctx) return;
-      void copyRuleToClient(ctx.path, button.dataset.targetClientId ?? "");
+      const action = button.dataset.action === "move" ? "move" : "copy";
+      void copyRuleToClient(ctx.path, button.dataset.targetClientId ?? "", action);
     });
   });
   document.querySelector<HTMLButtonElement>("#rule-context-copy-path")?.addEventListener("click", async (event) => {
@@ -2147,7 +2446,7 @@ function renderApp(preserveScroll = false): void {
   const clientTabScrollTop = preserveScroll ? (document.querySelector<HTMLElement>(".client-tab-scroll")?.scrollTop ?? 0) : 0;
   const clientListScrollTop = preserveScroll ? (document.querySelector<HTMLElement>(".client-list")?.scrollTop ?? 0) : 0;
   applyThemeToDocument();
-  appRoot.innerHTML = `<div class="app-shell ${state.currentView === "market" ? "market-preview-shell" : ""}">${renderWindowControls()}${renderSidebar()}${renderContent()}${renderConfirmDialog()}${renderImportDialog()}${renderMarketInstallDialog()}${renderMcpInstallDialog()}${renderSkillGroupDialog()}${renderSkillLinkDialog()}${renderGitInstallDialog()}</div>`;
+  appRoot.innerHTML = `<div class="app-shell ${state.currentView === "market" ? "market-preview-shell" : ""}">${renderWindowControls()}${renderSidebar()}${renderContent()}${renderConfirmDialog()}${renderImportDialog()}${renderMarketInstallDialog()}${renderMcpInstallDialog()}${renderSkillGroupDialog()}${renderSkillLinkDialog()}${renderGitInstallDialog()}${renderProjectAddSkillDialog()}</div>`;
   bindInteractions();
   refreshSkillContextMenu();
   refreshRuleContextMenu();
@@ -2162,8 +2461,8 @@ function renderApp(preserveScroll = false): void {
 }
 
 function bindInteractions(): void {
-  // 仅主页客户端行：WSL L2 复用 .client-row 但带 data-wsl-client，由专属 handler 处理，避免切回主页。
-  document.querySelectorAll<HTMLButtonElement>(".client-row:not([data-wsl-client])").forEach((button) => {
+  // 仅主页客户端行：WSL/项目 L2 复用 .client-row 但带专属 data-*，由各自 handler 处理，避免切回主页。
+  document.querySelectorAll<HTMLButtonElement>(".client-row:not([data-wsl-client]):not([data-project-client])").forEach((button) => {
     button.addEventListener("click", () => {
       state.skillContextMenu = null;
       state.clientMenuOpen = false;
@@ -2273,6 +2572,69 @@ function bindInteractions(): void {
     button.addEventListener("click", () => {
       state.wslActiveClientId = button.dataset.wslClient ?? "";
       state.activeClientTab = "skills";
+      renderApp(true);
+    });
+  });
+  // —— 项目页事件 ——
+  document.querySelectorAll<HTMLButtonElement>("[data-project-id]").forEach((button) => {
+    button.addEventListener("click", () => selectProject(button.dataset.projectId ?? ""));
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-project-back]").forEach((button) => {
+    button.addEventListener("click", () => backToProjects());
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-project-client]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeProjectClientId = button.dataset.projectClient ?? "";
+      state.activeClientTab = "skills";
+      renderApp(true);
+    });
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-add-project]").forEach((button) => {
+    button.addEventListener("click", () => void addProject());
+  });
+  document.querySelectorAll<HTMLElement>("[data-remove-project]").forEach((element) => {
+    element.addEventListener("click", (event) => {
+      event.stopPropagation();
+      removeProject(element.dataset.removeProject ?? "");
+    });
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-project-skill-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const f = button.dataset.projectSkillFilter;
+      state.projectSkillFilter = f === "enabled" ? "enabled" : f === "disabled" ? "disabled" : "all";
+      renderApp(true);
+    });
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-skill-toggle]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const skillDir = button.dataset.skillToggle;
+      const clientId = button.dataset.skillClient;
+      if (!skillDir || !clientId) return;
+      const enabled = button.dataset.skillEnabled !== "1";
+      void setProjectSkillEnabled(clientId, skillDir, enabled);
+    });
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-add-project-skill]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.projectAddSkillDialog = { clientId: button.dataset.addProjectSkill ?? "" };
+      renderApp(true);
+    });
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-add-skill-path]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const dlg = state.projectAddSkillDialog;
+      if (!dlg) return;
+      const path = button.dataset.addSkillPath ?? "";
+      state.projectAddSkillDialog = null;
+      renderApp(true);
+      void transferSkills([path], dlg.clientId, "copy");
+    });
+  });
+  document.querySelectorAll<HTMLElement>("[data-close-add-skill], [data-add-skill-backdrop]").forEach((el) => {
+    el.addEventListener("click", (event) => {
+      if (event.target !== event.currentTarget) return;
+      state.projectAddSkillDialog = null;
       renderApp(true);
     });
   });
@@ -2450,6 +2812,25 @@ function bindInteractions(): void {
     renderApp();
   });
   document.querySelectorAll<HTMLButtonElement>("#refresh-detection").forEach((button) => button.addEventListener("click", () => void loadEnvironment(true)));
+  document.querySelectorAll<HTMLButtonElement>("[data-open-terminal]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const path = button.dataset.openTerminal;
+      if (!path) return;
+      void invoke("open_terminal_at", { path }).catch((e) =>
+        setSkillActionMessage(`打开终端失败：${e instanceof Error ? e.message : String(e)}`, 4000)
+      );
+    });
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-launch-project]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const clientId = button.dataset.launchProject;
+      const projectPath = button.dataset.projectPath;
+      if (!clientId || !projectPath) return;
+      void invoke("launch_client_in_project", { projectPath, clientId }).catch((e) =>
+        setSkillActionMessage(`启动失败：${e instanceof Error ? e.message : String(e)}`, 4000)
+      );
+    });
+  });
   document.querySelectorAll<HTMLButtonElement>(".launch-client-button").forEach((button) => {
     button.addEventListener("click", async () => {
       const clientId = button.dataset.clientId;
