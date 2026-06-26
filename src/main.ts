@@ -1204,7 +1204,38 @@ function backToProjects(): void {
   renderApp(true);
 }
 
-// 项目级 Skill 启停：乐观更新——先本地翻转 enabled 并就地重渲染（配合稳定排序，位置不变、无 loading 抖动），再后台落盘；失败回滚。
+// 仅就地更新被点 skill 的 toggle 按钮 + 行状态 + 筛选计数（不 renderApp，彻底消除整页抖动）。
+function applyProjectSkillToggleDom(clientId: string, skillDir: string, enabled: boolean): void {
+  document.querySelectorAll<HTMLButtonElement>("[data-skill-toggle]").forEach((btn) => {
+    if (btn.dataset.skillToggle !== skillDir || btn.dataset.skillClient !== clientId) return;
+    const row = btn.closest<HTMLElement>(".project-skill-row");
+    // 非「全部」筛选下，状态变得不符合当前筛选 → 移除该行
+    if (state.projectSkillFilter !== "all") {
+      const keep = state.projectSkillFilter === "enabled" ? enabled : !enabled;
+      if (!keep) {
+        row?.remove();
+        return;
+      }
+    }
+    btn.classList.toggle("is-on", enabled);
+    btn.classList.toggle("is-off", !enabled);
+    btn.textContent = enabled ? "已启用" : "已禁用";
+    btn.dataset.skillEnabled = enabled ? "1" : "0";
+    row?.classList.toggle("is-disabled", !enabled);
+  });
+  // 局部刷新筛选计数 chip（state.environment 已乐观更新，clientSkills 重算即为最新）。
+  const skills = clientSkills(clientId);
+  const en = skills.filter((s) => s.enabled !== false).length;
+  const setText = (key: string, label: string): void => {
+    const chip = document.querySelector(`[data-project-skill-filter="${key}"]`);
+    if (chip) chip.textContent = label;
+  };
+  setText("all", `全部 ${skills.length}`);
+  setText("enabled", `已启用 ${en}`);
+  setText("disabled", `已禁用 ${skills.length - en}`);
+}
+
+// 项目级 Skill 启停：乐观更新——本地翻转 enabled 后只就地更新那一行（零 renderApp、零抖动），再后台落盘；失败回滚。
 async function setProjectSkillEnabled(clientId: string, skillDir: string, enabled: boolean): Promise<void> {
   const projectId = clientId.split("@proj-")[1] ?? "";
   const project = state.projects.find((p) => p.id === projectId);
@@ -1214,7 +1245,7 @@ async function setProjectSkillEnabled(clientId: string, skillDir: string, enable
   }
   const skill = state.environment?.skills.find((s) => s.clientId === clientId && s.directory === skillDir);
   if (skill) skill.enabled = enabled;
-  renderApp(true);
+  applyProjectSkillToggleDom(clientId, skillDir, enabled);
   try {
     const msg = await api.setProjectSkillEnabled(project.path, clientId, skillDir, enabled);
     setSkillActionMessage(msg, 2000);
