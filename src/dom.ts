@@ -1,5 +1,5 @@
 // 纯助手函数（无任何模块状态依赖）：HTML 转义、图标、格式化、主题判定等。
-import type { ThemeMode, ThemeName, RuntimeSkill, RuntimeRule } from "./types";
+import type { ThemeMode, ThemeName, RuntimeSkill, RuntimeRule, RuntimeMcpServer } from "./types";
 
 export function systemPrefersDark(): boolean {
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
@@ -127,4 +127,17 @@ export function ruleTone(rule: RuntimeRule): string {
   const tones = ["green", "blue", "purple", "orange", "red", "cyan", "slate"];
   const seed = `${rule.clientId}:${rule.path}`.split("").reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
   return tones[seed % tones.length];
+}
+
+// 备注 key：按「名字」共享——同名 skill/mcp/rule 共用一条备注（作用一致）。
+export function noteKeyForSkill(skill: RuntimeSkill): string {
+  return `skill:${skill.directory || skill.name}`;
+}
+
+export function noteKeyForMcp(mcp: RuntimeMcpServer): string {
+  return `mcp:${mcp.name}`;
+}
+
+export function noteKeyForRule(rule: RuntimeRule): string {
+  return `rule:${rule.name}`;
 }

@@ -134,3 +134,8 @@ export function mcpTargetClients(): RuntimeClient[] {
     .filter((client) => mcpWritableClientIds.has(client.id))
     .sort((a, b) => (order.get(a.id) ?? 999) - (order.get(b.id) ?? 999));
 }
+
+// 读取某 key 的用户备注（state.notes 由启动时 api.getNotes 加载）。
+export function noteOf(key: string): string {
+  return state.notes[key] ?? "";
+}

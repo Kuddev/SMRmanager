@@ -1,6 +1,9 @@
 import { state } from "../state";
 import { html, updateTimestamp } from "../dom";
 
+// 由 vite.config.ts 的 define 注入（来自 package.json version）。
+declare const __APP_VERSION__: string;
+
 export function renderSettingsView(): string {
   const hasUpdate = Boolean(state.updateInfo?.available && state.updateInfo.latestVersion);
   const updateStatus = state.updateChecking
@@ -22,7 +25,7 @@ export function renderSettingsView(): string {
         </div>
 
         <section class="settings-section">
-          <div class="settings-section-title"><div><h3>应用更新</h3><p>内置 GitHub Releases 更新检查，优先读取 Release 附带的 latest.json。</p></div><span class="settings-version-pill">当前 v${html(state.updateInfo?.currentVersion ?? "0.1.0")}</span></div>
+          <div class="settings-section-title"><div><h3>应用更新</h3><p>内置 GitHub Releases 更新检查，优先读取 Release 附带的 latest.json。</p></div><span class="settings-version-pill">当前 v${html(state.updateInfo?.currentVersion ?? __APP_VERSION__)}</span></div>
           <div class="update-panel ${hasUpdate ? "has-update" : ""}">
             <div class="update-panel-main">
               <div class="update-icon">${hasUpdate ? "↑" : "✓"}</div>
@@ -88,6 +91,21 @@ export function renderSettingsView(): string {
                   .join("")}</div>`
               : `<p class="scan-roots-empty">尚未添加扩展扫描目录。</p>`
           }
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-section-title"><div><h3>WebDAV 备份</h3><p>把备注与应用配置（分组 / 项目 / 扫描根 / 客户端顺序 / 主题）备份到 WebDAV，可在其它设备恢复。账号密码仅保存在本机。</p></div></div>
+          <div class="scan-roots-manual">
+            <input id="webdav-url" class="group-name-input" type="text" value="${html(state.webdavConfig.url)}" placeholder="WebDAV 目录地址，如 https://dav.jianguoyun.com/dav/smr/" />
+          </div>
+          <div class="scan-roots-manual">
+            <input id="webdav-user" class="group-name-input" type="text" value="${html(state.webdavConfig.username)}" placeholder="账号" />
+            <input id="webdav-pass" class="group-name-input" type="password" value="${html(state.webdavConfig.password)}" placeholder="密码 / 应用密码" />
+          </div>
+          <div class="scan-roots-actions">
+            <button id="webdav-backup" class="primary-button" type="button" ${state.webdavBusy ? "disabled" : ""}>${state.webdavBusy ? "处理中…" : "备份到 WebDAV"}</button>
+            <button id="webdav-restore" class="secondary-button" type="button" ${state.webdavBusy ? "disabled" : ""}>从 WebDAV 恢复</button>
+          </div>
         </section>
       </section>
     </main>`;

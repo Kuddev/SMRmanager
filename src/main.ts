@@ -63,7 +63,8 @@ import {
   marketSkillTargets,
   mcpTargetClients,
   skillWritableClientIds,
-  mcpWritableClientIds
+  mcpWritableClientIds,
+  noteOf
 } from "./core/data";
 import { setSkillActionMessage } from "./core/toast";
 import {
@@ -76,7 +77,10 @@ import {
   distroIcon,
   skillKey,
   epoch,
-  updateTimestamp
+  updateTimestamp,
+  noteKeyForSkill,
+  noteKeyForMcp,
+  noteKeyForRule
 } from "./dom";
 
 import { renderSettingsView } from "./views/settings";
@@ -87,6 +91,7 @@ import {
   saveScanRoots,
   saveClientOrder,
   saveProjects,
+  saveWebdavConfig,
   themeStorageKey,
   dismissedUpdateStorageKey
 } from "./state";
@@ -760,6 +765,146 @@ function renderClientsList(): string {
     </section>`;
 }
 
+// —— WebDAV 备份 / 恢复（备注 + 应用配置）——
+function webdavFileUrl(): string {
+  return state.webdavConfig.url.trim().replace(/\/+$/, "") + "/smrmanager-backup.json";
+}
+
+async function backupToWebdav(): Promise<void> {
+  const cfg = state.webdavConfig;
+  if (!cfg.url.trim()) {
+    setSkillActionMessage("请先填写 WebDAV 地址", 3000);
+    return;
+  }
+  state.webdavBusy = true;
+  renderApp(true);
+  try {
+    const backup = {
+      app: "SMRmanager",
+      backupVersion: 1,
+      exportedAt: new Date().toISOString(),
+      notes: state.notes,
+      config: {
+        skillGroups: state.skillGroups,
+        scanRoots: state.scanRoots,
+        clientOrder: state.clientOrder,
+        projects: state.projects,
+        themeMode: state.themeMode
+      }
+    };
+    await api.webdavPut(webdavFileUrl(), cfg.username, cfg.password, JSON.stringify(backup, null, 2));
+    setSkillActionMessage("已备份到 WebDAV", 2600);
+  } catch (error) {
+    setSkillActionMessage(`备份失败：${error instanceof Error ? error.message : String(error)}`, 5200);
+  } finally {
+    state.webdavBusy = false;
+    renderApp(true);
+  }
+}
+
+async function restoreFromWebdav(): Promise<void> {
+  const cfg = state.webdavConfig;
+  if (!cfg.url.trim()) {
+    setSkillActionMessage("请先填写 WebDAV 地址", 3000);
+    return;
+  }
+  state.webdavBusy = true;
+  renderApp(true);
+  try {
+    const content = await api.webdavGet(webdavFileUrl(), cfg.username, cfg.password);
+    const backup = JSON.parse(content);
+    if (backup.notes && typeof backup.notes === "object") {
+      state.notes = backup.notes;
+      await api.setAllNotes(backup.notes);
+    }
+    const c = backup.config ?? {};
+    if (Array.isArray(c.skillGroups)) {
+      state.skillGroups = c.skillGroups;
+      saveSkillGroups();
+    }
+    if (Array.isArray(c.scanRoots)) {
+      state.scanRoots = c.scanRoots;
+      saveScanRoots();
+    }
+    if (Array.isArray(c.clientOrder)) {
+      state.clientOrder = c.clientOrder;
+      saveClientOrder();
+    }
+    if (Array.isArray(c.projects)) {
+      state.projects = c.projects;
+      saveProjects();
+    }
+    if (c.themeMode === "light" || c.themeMode === "dark" || c.themeMode === "system") {
+      setThemeMode(c.themeMode);
+    }
+    state.webdavBusy = false;
+    await loadEnvironment(true);
+    setSkillActionMessage("已从 WebDAV 恢复", 2800);
+  } catch (error) {
+    state.webdavBusy = false;
+    renderApp(true);
+    setSkillActionMessage(`恢复失败：${error instanceof Error ? error.message : String(error)}`, 5200);
+  }
+}
+
+// —— 用户备注（作用标注，存 ~/.smrmanager/notes.json，按名字共享）——
+async function loadNotes(): Promise<void> {
+  try {
+    state.notes = await api.getNotes();
+    renderApp();
+  } catch {
+    // 备注加载失败忽略，不影响主功能。
+  }
+}
+
+function openNoteDialog(key: string, label: string): void {
+  state.noteDialog = { key, label };
+  renderApp(true);
+}
+
+async function setNoteValue(key: string, value: string): Promise<void> {
+  state.noteDialog = null;
+  const next = { ...state.notes };
+  if (value.trim()) next[key] = value.trim();
+  else delete next[key];
+  state.notes = next;
+  renderApp(true);
+  try {
+    await api.setNote(key, value);
+  } catch (error) {
+    setSkillActionMessage(`备注保存失败：${error instanceof Error ? error.message : String(error)}`, 4200);
+  }
+}
+
+// 备注小标签：有备注显示内容、无则显示「+ 备注」，点击打开编辑弹框。
+function renderNoteTag(key: string, label: string): string {
+  const note = noteOf(key);
+  return `<button class="note-bar ${note ? "has-note" : "is-empty"}" data-note-key="${html(key)}" data-note-label="${html(label)}" type="button" title="${note ? "编辑备注" : "添加备注"}">
+    <span class="note-bar-icon">📝</span>
+    <span class="note-bar-text">${note ? html(note) : "添加备注…"}</span>
+  </button>`;
+}
+
+function renderNoteDialog(): string {
+  const dlg = state.noteDialog;
+  if (!dlg) return "";
+  const current = noteOf(dlg.key);
+  return `
+    <div class="alert-dialog-backdrop" role="presentation" data-note-backdrop="1">
+      <section class="alert-dialog note-dialog">
+        <div class="alert-dialog-copy">
+          <h2>备注</h2>
+          <p>为「${html(dlg.label)}」标注作用，便于以后辨识（按名字共享；留空即删除）。</p>
+          <textarea id="note-input" class="note-textarea" rows="4" placeholder="例如：把代码注释生成 OpenAPI 文档…">${html(current)}</textarea>
+        </div>
+        <div class="alert-dialog-actions">
+          <button class="secondary-button" data-note-cancel="1" type="button">取消</button>
+          <button class="primary-button" id="note-save" type="button">保存</button>
+        </div>
+      </section>
+    </div>`;
+}
+
 function renderDetectedMcp(item: RuntimeMcpServer): string {
   const detail = item.command || item.url || item.sourcePath;
   const togglable = mcpWritableClientIds.has(item.clientId);
@@ -769,7 +914,7 @@ function renderDetectedMcp(item: RuntimeMcpServer): string {
   return `
     <article class="mcp-row detected">
       <div class="tool-icon ${item.transport === "stdio" ? "teal" : "slate"}">${item.transport === "stdio" ? "⌘" : "↗"}</div>
-      <div class="tool-copy"><strong>${html(item.name)}</strong><span>${html(detail)}</span><small>${html(item.sourcePath)}</small></div>
+      <div class="tool-copy"><strong>${html(item.name)}</strong><span>${html(detail)}</span><small>${html(item.sourcePath)}</small><div class="note-row">${renderNoteTag(noteKeyForMcp(item), item.name)}</div></div>
       <div class="row-actions">${status}<button class="square-button" data-open-path="${html(item.sourcePath)}" type="button" title="打开配置文件所在位置">⚙</button></div>
     </article>`;
 }
@@ -805,6 +950,7 @@ function renderClientSkillRow(skill: RuntimeSkill): string {
         <div class="skill-row-title"><strong>${html(skill.name)}</strong></div>
         <p>${html(skillDescription(skill))}</p>
         <div class="skill-chip-row">${skillTags(skill).map((tag) => `<span>${html(tag)}</span>`).join("")}</div>
+        <div class="note-row">${renderNoteTag(noteKeyForSkill(skill), skill.name)}</div>
         <code>${html(skill.path)}</code>
       </div>
     </article>`;
@@ -853,6 +999,7 @@ function renderClientRuleRow(rule: RuntimeRule): string {
         <div class="skill-row-title"><strong>${html(rule.name)}</strong><span class="rule-source-pill">${html(rule.kind)}</span></div>
         <p>${html(rulePreview(rule))}</p>
         <div class="skill-chip-row"><span>${html(rule.clientName)}</span><span>${html(rule.source)}</span>${rule.managed ? "<span>工作区</span>" : "<span>客户端目录</span>"}</div>
+        <div class="note-row">${renderNoteTag(noteKeyForRule(rule), rule.name)}</div>
         <code>${html(rule.path)}</code>
       </div>
       <div class="client-skill-meta"><span>更新时间</span><strong>${formatUpdated(rule.updatedAt)}</strong></div>
@@ -1382,6 +1529,7 @@ function renderProjectSkillRow(skill: RuntimeSkill): string {
         <div class="skill-chip-row">${skillTags(skill)
           .map((tag) => `<span>${html(tag)}</span>`)
           .join("")}<span class="skill-updated">更新于 ${formatUpdated(skill.updatedAt)}</span></div>
+        <div class="note-row">${renderNoteTag(noteKeyForSkill(skill), skill.name)}</div>
         <code>${html(skill.path)}</code>
       </div>
       <button class="status-pill skill-toggle ${enabled ? "is-on" : "is-off"}" data-skill-toggle="${html(skill.directory)}" data-skill-client="${html(skill.clientId)}" data-skill-enabled="${enabled ? "1" : "0"}" type="button">${enabled ? "已启用" : "已禁用"}</button>
@@ -1461,6 +1609,7 @@ function renderRuleListRow(rule: RuntimeRule): string {
         <div class="skill-row-title"><strong>${html(rule.name)}</strong><span class="rule-source-pill">${html(rule.kind)}</span></div>
         <p>${html(rulePreview(rule))}</p>
         <div class="skill-chip-row"><span>${html(rule.clientName)}</span><span>${html(rule.source)}</span>${rule.managed ? "<span>工作区</span>" : "<span>客户端目录</span>"}</div>
+        <div class="note-row">${renderNoteTag(noteKeyForRule(rule), rule.name)}</div>
         <code>${html(rule.path)}</code>
       </div>
       <div class="skill-row-meta source"><span>来源</span><strong>${html(rule.clientName)}</strong></div>
@@ -1626,6 +1775,7 @@ function renderSkillsView(): string {
           <div class="skill-row-title"><strong>${html(skill.name)}</strong>${pill}</div>
           <p>${html(skillDescription(skill))}</p>
           <div class="skill-chip-row">${skillTags(skill).map((tag) => `<span>${html(tag)}</span>`).join("")}</div>
+        <div class="note-row">${renderNoteTag(noteKeyForSkill(skill), skill.name)}</div>
           <code>${html(skill.path)}</code>
           ${linkedBadges}${rowActions}
         </div>
@@ -2310,7 +2460,7 @@ function renderApp(preserveScroll = false): void {
   const clientTabScrollTop = preserveScroll ? (document.querySelector<HTMLElement>(".client-tab-scroll")?.scrollTop ?? 0) : 0;
   const clientListScrollTop = preserveScroll ? (document.querySelector<HTMLElement>(".client-list")?.scrollTop ?? 0) : 0;
   applyThemeToDocument();
-  appRoot.innerHTML = `<div class="app-shell ${state.currentView === "market" ? "market-preview-shell" : ""}">${renderWindowControls()}${renderSidebar()}${renderContent()}${renderConfirmDialog()}${renderImportDialog()}${renderMarketInstallDialog()}${renderMcpInstallDialog()}${renderSkillGroupDialog()}${renderSkillLinkDialog()}${renderGitInstallDialog()}${renderProjectAddSkillDialog()}</div>`;
+  appRoot.innerHTML = `<div class="app-shell ${state.currentView === "market" ? "market-preview-shell" : ""}">${renderWindowControls()}${renderSidebar()}${renderContent()}${renderConfirmDialog()}${renderImportDialog()}${renderMarketInstallDialog()}${renderMcpInstallDialog()}${renderSkillGroupDialog()}${renderSkillLinkDialog()}${renderGitInstallDialog()}${renderProjectAddSkillDialog()}${renderNoteDialog()}</div>`;
   bindInteractions();
   refreshSkillContextMenu();
   refreshRuleContextMenu();
@@ -2493,6 +2643,44 @@ function bindInteractions(): void {
     const list = document.querySelector<HTMLElement>(".add-skill-list");
     if (list) list.innerHTML = projectAddSkillRows();
   });
+  // —— 备注 ——
+  document.querySelectorAll<HTMLButtonElement>("[data-note-key]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openNoteDialog(button.dataset.noteKey ?? "", button.dataset.noteLabel ?? "");
+    });
+  });
+  document.querySelector<HTMLButtonElement>("#note-save")?.addEventListener("click", () => {
+    const dlg = state.noteDialog;
+    const input = document.querySelector<HTMLTextAreaElement>("#note-input");
+    if (!dlg || !input) return;
+    void setNoteValue(dlg.key, input.value);
+  });
+  document.querySelectorAll<HTMLElement>("[data-note-cancel], [data-note-backdrop]").forEach((el) => {
+    el.addEventListener("click", (event) => {
+      if (event.target !== event.currentTarget) return;
+      state.noteDialog = null;
+      renderApp(true);
+    });
+  });
+  // —— WebDAV ——
+  const webdavUrl = document.querySelector<HTMLInputElement>("#webdav-url");
+  webdavUrl?.addEventListener("input", () => {
+    state.webdavConfig.url = webdavUrl.value;
+    saveWebdavConfig();
+  });
+  const webdavUser = document.querySelector<HTMLInputElement>("#webdav-user");
+  webdavUser?.addEventListener("input", () => {
+    state.webdavConfig.username = webdavUser.value;
+    saveWebdavConfig();
+  });
+  const webdavPass = document.querySelector<HTMLInputElement>("#webdav-pass");
+  webdavPass?.addEventListener("input", () => {
+    state.webdavConfig.password = webdavPass.value;
+    saveWebdavConfig();
+  });
+  document.querySelector<HTMLButtonElement>("#webdav-backup")?.addEventListener("click", () => void backupToWebdav());
+  document.querySelector<HTMLButtonElement>("#webdav-restore")?.addEventListener("click", () => void restoreFromWebdav());
   // 列表用事件委托（搜索局部更新 innerHTML 后按钮仍可点）。
   document.querySelector<HTMLElement>(".add-skill-list")?.addEventListener("click", (event) => {
     const button = (event.target as HTMLElement).closest<HTMLElement>("[data-add-skill-path]");
@@ -3113,3 +3301,4 @@ window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change",
 renderApp();
 void loadEnvironment();
 void refreshInstalledMarketSkills();
+void loadNotes();

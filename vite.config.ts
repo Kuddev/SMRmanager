@@ -1,9 +1,11 @@
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import tailwindcss from "@tailwindcss/vite";
 
 const projectRoot = fileURLToPath(new URL(".", import.meta.url));
+const appVersion = JSON.parse(readFileSync(path.resolve(projectRoot, "package.json"), "utf-8")).version as string;
 
 function reloadPublicAssets(): Plugin {
   return {
@@ -26,6 +28,9 @@ function reloadPublicAssets(): Plugin {
 
 export default defineConfig({
   clearScreen: false,
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion)
+  },
   plugins: [tailwindcss(), reloadPublicAssets()],
   server: {
     host: "127.0.0.1",

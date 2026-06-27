@@ -2177,6 +2177,100 @@ pub fn set_project_skill_enabled(
     }
 }
 
+fn notes_file() -> PathBuf {
+    home_dir().join(".smrmanager").join("notes.json")
+}
+
+/// 读取用户备注（key → 备注文本），存于 ~/.smrmanager/notes.json。
+#[tauri::command]
+pub fn get_notes() -> Result<BTreeMap<String, String>, String> {
+    let path = notes_file();
+    if !path.exists() {
+        return Ok(BTreeMap::new());
+    }
+    let content = std::fs::read_to_string(&path).map_err(|e| format!("读取备注失败: {e}"))?;
+    serde_json::from_str(&content).map_err(|e| format!("解析备注失败: {e}"))
+}
+
+/// 设置 / 清除某个 key 的备注（空文本即删除该条）。
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_note(key: String, note: String) -> Result<(), String> {
+    let path = notes_file();
+    let mut map: BTreeMap<String, String> = if path.exists() {
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|c| serde_json::from_str(&c).ok())
+            .unwrap_or_default()
+    } else {
+        BTreeMap::new()
+    };
+    let trimmed = note.trim();
+    if trimmed.is_empty() {
+        map.remove(&key);
+    } else {
+        map.insert(key, trimmed.to_string());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建备注目录失败: {e}"))?;
+    }
+    let json = serde_json::to_string_pretty(&map).map_err(|e| format!("序列化备注失败: {e}"))?;
+    std::fs::write(&path, json).map_err(|e| format!("写入备注失败: {e}"))?;
+    Ok(())
+}
+
+// —— WebDAV 备份（手动备份 / 恢复：备注 + 应用配置）——
+fn base64_encode(input: &[u8]) -> String {
+    const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = *chunk.get(1).unwrap_or(&0);
+        let b2 = *chunk.get(2).unwrap_or(&0);
+        out.push(T[(b0 >> 2) as usize] as char);
+        out.push(T[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+        out.push(if chunk.len() > 1 { T[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { T[(b2 & 0x3f) as usize] as char } else { '=' });
+    }
+    out
+}
+
+fn basic_auth(username: &str, password: &str) -> String {
+    format!("Basic {}", base64_encode(format!("{username}:{password}").as_bytes()))
+}
+
+/// 上传备份内容到 WebDAV 文件 URL（Basic 认证）。
+#[tauri::command(rename_all = "camelCase")]
+pub fn webdav_put(url: String, username: String, password: String, content: String) -> Result<(), String> {
+    ureq::put(&url)
+        .set("Authorization", &basic_auth(&username, &password))
+        .set("Content-Type", "application/json")
+        .send_string(&content)
+        .map_err(|e| format!("WebDAV 上传失败: {e}"))?;
+    Ok(())
+}
+
+/// 从 WebDAV 文件 URL 下载备份内容。
+#[tauri::command(rename_all = "camelCase")]
+pub fn webdav_get(url: String, username: String, password: String) -> Result<String, String> {
+    let resp = ureq::get(&url)
+        .set("Authorization", &basic_auth(&username, &password))
+        .call()
+        .map_err(|e| format!("WebDAV 下载失败: {e}"))?;
+    resp.into_string().map_err(|e| format!("读取响应失败: {e}"))
+}
+
+/// 整体覆盖写入备注（用于从备份恢复）。
+#[tauri::command]
+pub fn set_all_notes(notes: BTreeMap<String, String>) -> Result<(), String> {
+    let path = notes_file();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建备注目录失败: {e}"))?;
+    }
+    let json = serde_json::to_string_pretty(&notes).map_err(|e| format!("序列化备注失败: {e}"))?;
+    std::fs::write(&path, json).map_err(|e| format!("写入备注失败: {e}"))?;
+    Ok(())
+}
+
 /// 客户端可写入 Rule 的目录：优先 rule_paths 中的目录型（无扩展名），否则取首个路径的父目录。
 fn client_rule_dir(client_id: &str) -> Option<PathBuf> {
     let def = client_definitions().into_iter().find(|d| d.id == client_id)?;

@@ -76,6 +76,17 @@ export const api = {
   deleteClientConfig: (clientId: string) => invoke<string>("delete_client_config", { clientId }),
   openPath: (target: string) => invoke<void>("open_path", { target }),
 
+  // —— 用户备注（~/.smrmanager/notes.json）——
+  getNotes: () => invoke<Record<string, string>>("get_notes"),
+  setNote: (key: string, note: string) => invoke<void>("set_note", { key, note }),
+  setAllNotes: (notes: Record<string, string>) => invoke<void>("set_all_notes", { notes }),
+
+  // —— WebDAV 备份 ——
+  webdavPut: (url: string, username: string, password: string, content: string) =>
+    invoke<void>("webdav_put", { url, username, password, content }),
+  webdavGet: (url: string, username: string, password: string) =>
+    invoke<string>("webdav_get", { url, username, password }),
+
   // —— 市场 / Git 安装 ——
   installMarketSkill: (request: {
     skillId: string;

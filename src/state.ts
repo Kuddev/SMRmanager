@@ -30,6 +30,7 @@ const skillGroupsStorageKey = "smrmanager-skill-groups";
 const scanRootsStorageKey = "smrmanager-scan-roots";
 const clientOrderStorageKey = "smrmanager-client-order";
 const projectsStorageKey = "smrmanager-projects";
+const webdavStorageKey = "smrmanager-webdav";
 
 export function readStoredThemeMode(): ThemeMode {
   const stored = localStorage.getItem(themeStorageKey);
@@ -118,6 +119,21 @@ export function loadProjects(): ProjectEntry[] {
   }
 }
 
+export function loadWebdavConfig(): { url: string; username: string; password: string } {
+  try {
+    const raw = localStorage.getItem(webdavStorageKey);
+    if (!raw) return { url: "", username: "", password: "" };
+    const p = JSON.parse(raw);
+    return {
+      url: typeof p.url === "string" ? p.url : "",
+      username: typeof p.username === "string" ? p.username : "",
+      password: typeof p.password === "string" ? p.password : ""
+    };
+  } catch {
+    return { url: "", username: "", password: "" };
+  }
+}
+
 export const hotState = import.meta.hot?.data as HotState | undefined;
 const hotView = hotState?.currentView as ViewName | "roles" | undefined;
 const initialThemeMode: ThemeMode = hotState?.themeMode ?? readStoredThemeMode();
@@ -164,6 +180,10 @@ export type AppState = {
   projectSkillFilter: "all" | "enabled" | "disabled";
   projectAddSkillDialog: { clientId: string } | null;
   projectAddSkillQuery: string;
+  notes: Record<string, string>;
+  noteDialog: { key: string; label: string } | null;
+  webdavConfig: { url: string; username: string; password: string };
+  webdavBusy: boolean;
   wslDistros: WslDistro[];
   wslDetecting: boolean;
   wslDetectError: string | null;
@@ -229,6 +249,10 @@ export const state: AppState = {
   projectSkillFilter: "all",
   projectAddSkillDialog: null,
   projectAddSkillQuery: "",
+  notes: {},
+  noteDialog: null,
+  webdavConfig: loadWebdavConfig(),
+  webdavBusy: false,
   wslDistros: [],
   wslDetecting: false,
   wslDetectError: null,
@@ -279,6 +303,14 @@ export function saveClientOrder(): void {
 export function saveProjects(): void {
   try {
     localStorage.setItem(projectsStorageKey, JSON.stringify(state.projects));
+  } catch {
+    // 持久化失败忽略。
+  }
+}
+
+export function saveWebdavConfig(): void {
+  try {
+    localStorage.setItem(webdavStorageKey, JSON.stringify(state.webdavConfig));
   } catch {
     // 持久化失败忽略。
   }
