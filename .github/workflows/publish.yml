@@ -56,7 +56,7 @@ jobs:
         run: npm ci
 
       - name: Build and publish Tauri bundles
-        uses: tauri-apps/tauri-action@v1
+        uses: tauri-apps/tauri-action@action-v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -69,9 +69,7 @@ jobs:
             - macOS Apple Silicon：DMG / App Bundle
           releaseDraft: false
           prerelease: false
-          uploadUpdaterJson: true
+          includeUpdaterJson: true
           updaterJsonPreferNsis: true
-          uploadWorkflowArtifacts: true
-          releaseAssetNamePattern: "[name]_[version]_[platform]_[arch][setup][ext]"
-          workflowArtifactNamePattern: "[name]_[version]_[platform]_[arch]_[bundle]"
+          assetNamePattern: "[name]_[version]_[platform]_[arch][setup][ext]"
           args: ${{ matrix.args }}
