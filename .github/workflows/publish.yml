@@ -1,0 +1,77 @@
+name: Publish desktop builds
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-tauri:
+    name: ${{ matrix.name }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            platform: windows-latest
+            args: ""
+          - name: macOS Intel
+            platform: macos-15-intel
+            args: "--target x86_64-apple-darwin"
+          - name: macOS Apple Silicon
+            platform: macos-15
+            args: "--target aarch64-apple-darwin"
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ startsWith(matrix.platform, 'macos-') && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and publish Tauri bundles
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: SMRmanager v__VERSION__
+          releaseBody: |
+            自动构建发布产物：
+            - Windows x64：NSIS 安装包
+            - macOS Intel：DMG / App Bundle
+            - macOS Apple Silicon：DMG / App Bundle
+          releaseDraft: false
+          prerelease: false
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+          uploadWorkflowArtifacts: true
+          releaseAssetNamePattern: "[name]_[version]_[platform]_[arch][setup][ext]"
+          workflowArtifactNamePattern: "[name]_[version]_[platform]_[arch]_[bundle]"
+          args: ${{ matrix.args }}
