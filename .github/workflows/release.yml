@@ -1,0 +1,54 @@
+name: Release (Windows)
+
+# 打 tag(如 v0.2.3)或手动触发时，自动构建 Windows 产物并发布到 Release。
+# 说明：当前应用是 Windows 专用（WSL/junction/Windows 路径），暂不含 macOS 构建。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Tauri build
+        run: npm run tauri build
+
+      - name: Prepare artifacts (portable + setup)
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          cp "src-tauri/target/release/smrmanager.exe" "SMRmanager_${VERSION}_windows_x64_portable.exe"
+          cp "src-tauri/target/release/bundle/nsis/SMRmanager_${VERSION}_x64-setup.exe" "SMRmanager_${VERSION}_x64-setup.exe"
+          ls -1 SMRmanager_*.exe
+
+      - name: Create / update Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            SMRmanager_*_windows_x64_portable.exe
+            SMRmanager_*_x64-setup.exe
