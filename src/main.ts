@@ -80,7 +80,8 @@ import {
   updateTimestamp,
   noteKeyForSkill,
   noteKeyForMcp,
-  noteKeyForRule
+  noteKeyForRule,
+  IS_MAC
 } from "./dom";
 
 import { renderSettingsView } from "./views/settings";
@@ -718,6 +719,7 @@ function renderThemeSwitch(id: string, extraClass = ""): string {
 
 function renderSidebar(): string {
   const nav = navItems
+    .filter(([, , view]) => !(IS_MAC && view === "wsl"))
     .map(([label, icon, view]) => `
       <button class="nav-item ${view === state.currentView ? "is-active" : ""}" data-view="${view}" type="button">
         <span class="nav-icon">${navIcon(icon)}</span><span>${label}</span>${view === "wsl" || view === "project" ? `<span class="nav-beta">Beta</span>` : ""}
@@ -1944,7 +1946,7 @@ function renderPlaceholder(title: string): string {
 function renderContent(): string {
   if (state.currentView === "clients") return renderClientView();
   if (state.currentView === "project") return renderProjectView();
-  if (state.currentView === "wsl") return renderWslView();
+  if (state.currentView === "wsl") return IS_MAC ? renderPlaceholder("WSL 管理（仅 Windows 支持）") : renderWslView();
   if (state.currentView === "mcp") return renderMcpView();
   if (state.currentView === "skills") return renderSkillsView();
   if (state.currentView === "rules") return renderRulesView();

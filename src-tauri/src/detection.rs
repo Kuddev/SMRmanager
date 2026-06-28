@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -1427,6 +1428,7 @@ fn safe_trash_name(value: &str) -> String {
     }
 }
 
+#[cfg(windows)]
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
 
 fn library_skills_dir() -> PathBuf {
@@ -1434,13 +1436,22 @@ fn library_skills_dir() -> PathBuf {
 }
 
 // 是否为 junction / symlink（reparse point）。Rust 的 FileType::is_symlink() 对 junction 返回 false，须查属性位。
+#[cfg(windows)]
 fn is_junction(path: &Path) -> bool {
     std::fs::symlink_metadata(path)
         .map(|meta| meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
         .unwrap_or(false)
 }
 
-// 创建目录联接（junction，免管理员）；失败回退绝对 symlink。
+// 非 Windows（macOS/Linux）：标准 symlink 即可，FileType::is_symlink() 准确。
+#[cfg(not(windows))]
+fn is_junction(path: &Path) -> bool {
+    std::fs::symlink_metadata(path)
+        .map(|meta| meta.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
+// 创建目录联接（Windows junction，免管理员）；失败回退绝对 symlink。非 Windows 用标准 symlink。
 fn create_junction(link: &Path, source: &Path) -> Result<(), String> {
     if link.exists() || is_junction(link) {
         return Err(format!("目标已存在: {}", path_to_string(link)));
@@ -1449,19 +1460,26 @@ fn create_junction(link: &Path, source: &Path) -> Result<(), String> {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("创建父目录失败 {}: {e}", path_to_string(parent)))?;
     }
-    let output = Command::new("cmd")
-        .args(["/c", "mklink", "/J"])
-        .arg(link)
-        .arg(source)
-        .output();
-    if let Ok(out) = output {
-        if out.status.success() {
-            return Ok(());
+    #[cfg(windows)]
+    {
+        let output = Command::new("cmd")
+            .args(["/c", "mklink", "/J"])
+            .arg(link)
+            .arg(source)
+            .output();
+        if let Ok(out) = output {
+            if out.status.success() {
+                return Ok(());
+            }
         }
+        // 回退：绝对路径 symlink（需开发者模式/管理员）。
+        std::os::windows::fs::symlink_dir(source, link)
+            .map_err(|e| format!("创建链接失败（junction 与 symlink 均失败）: {e}"))
     }
-    // 回退：绝对路径 symlink（需开发者模式/管理员）。
-    std::os::windows::fs::symlink_dir(source, link)
-        .map_err(|e| format!("创建链接失败（junction 与 symlink 均失败）: {e}"))
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(source, link).map_err(|e| format!("创建符号链接失败: {e}"))
+    }
 }
 
 // 仅移除链接本身。严禁用 remove_dir_all——那会穿透删除库源。
@@ -1673,15 +1691,34 @@ pub fn open_terminal_at(path: String) -> Result<(), String> {
     if !dir.is_dir() {
         return Err(format!("目录不存在: {path}"));
     }
-    // 优先 Windows Terminal（wt -d 直接在指定目录开一个标签）；回退到 cmd start 并 cd 到该目录。
-    if Command::new("wt.exe").args(["-d", &path]).spawn().is_ok() {
-        return Ok(());
+    #[cfg(windows)]
+    {
+        // 优先 Windows Terminal（wt -d 直接在指定目录开一个标签）；回退到 cmd start 并 cd 到该目录。
+        if Command::new("wt.exe").args(["-d", &path]).spawn().is_ok() {
+            return Ok(());
+        }
+        Command::new("cmd")
+            .args(["/c", "start", "", "cmd", "/k", "cd", "/d", &path])
+            .spawn()
+            .map_err(|e| format!("打开终端失败: {e}"))?;
+        Ok(())
     }
-    Command::new("cmd")
-        .args(["/c", "start", "", "cmd", "/k", "cd", "/d", &path])
-        .spawn()
-        .map_err(|e| format!("打开终端失败: {e}"))?;
-    Ok(())
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .args(["-a", "Terminal", path.as_str()])
+            .spawn()
+            .map_err(|e| format!("打开终端失败: {e}"))?;
+        Ok(())
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("x-terminal-emulator")
+            .current_dir(&path)
+            .spawn()
+            .map_err(|e| format!("打开终端失败: {e}"))?;
+        Ok(())
+    }
 }
 
 /// 在项目目录启动客户端 CLI（Windows Terminal 内、以项目目录为工作目录运行 claude/codex/… ）；
@@ -1692,33 +1729,42 @@ pub fn launch_client_in_project(project_path: String, client_id: String) -> Resu
     if !dir.is_dir() {
         return Err(format!("目录不存在: {project_path}"));
     }
-    let base_id = client_id.split('@').next().unwrap_or(client_id.as_str());
-    let cli = match base_id {
-        "claude" => Some("claude"),
-        "codex" => Some("codex"),
-        "gemini" => Some("gemini"),
-        "opencode" => Some("opencode"),
-        "openclaw" => Some("openclaw"),
-        "hermes" => Some("hermes"),
-        _ => None,
-    };
-    let Some(cmd) = cli else {
-        // 非 CLI 客户端（IDE/桌面/工作台）：仅在项目目录打开终端。
-        return open_terminal_at(project_path);
-    };
-    // 优先 Windows Terminal：-d 设工作目录为项目目录，cmd /k 保留窗口便于交互与查看输出。
-    if Command::new("wt.exe")
-        .args(["-d", project_path.as_str(), "cmd", "/k", cmd])
-        .spawn()
-        .is_ok()
+    #[cfg(windows)]
     {
-        return Ok(());
+        let base_id = client_id.split('@').next().unwrap_or(client_id.as_str());
+        let cli = match base_id {
+            "claude" => Some("claude"),
+            "codex" => Some("codex"),
+            "gemini" => Some("gemini"),
+            "opencode" => Some("opencode"),
+            "openclaw" => Some("openclaw"),
+            "hermes" => Some("hermes"),
+            _ => None,
+        };
+        let Some(cmd) = cli else {
+            // 非 CLI 客户端（IDE/桌面/工作台）：仅在项目目录打开终端。
+            return open_terminal_at(project_path);
+        };
+        // 优先 Windows Terminal：-d 设工作目录为项目目录，cmd /k 保留窗口便于交互与查看输出。
+        if Command::new("wt.exe")
+            .args(["-d", project_path.as_str(), "cmd", "/k", cmd])
+            .spawn()
+            .is_ok()
+        {
+            return Ok(());
+        }
+        Command::new("cmd")
+            .args(["/c", "start", "", "cmd", "/k", &format!("cd /d \"{project_path}\" && {cmd}")])
+            .spawn()
+            .map_err(|e| format!("启动失败: {e}"))?;
+        Ok(())
     }
-    Command::new("cmd")
-        .args(["/c", "start", "", "cmd", "/k", &format!("cd /d \"{project_path}\" && {cmd}")])
-        .spawn()
-        .map_err(|e| format!("启动失败: {e}"))?;
-    Ok(())
+    #[cfg(not(windows))]
+    {
+        // macOS / Linux 暂在项目目录打开终端，CLI 自动运行待后续。
+        let _ = client_id;
+        open_terminal_at(project_path)
+    }
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -2695,7 +2741,14 @@ pub fn open_path(target: String) -> Result<(), String> {
                 .spawn()
                 .map_err(|e| format!("打开链接失败: {e}"))?;
         }
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
+        {
+            Command::new("open")
+                .arg(&target)
+                .spawn()
+                .map_err(|e| format!("打开链接失败: {e}"))?;
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
         {
             Command::new("xdg-open")
                 .arg(&target)
@@ -2725,7 +2778,14 @@ pub fn open_path(target: String) -> Result<(), String> {
                 .map_err(|e| format!("打开失败: {e}"))?;
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("打开失败: {e}"))?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
         Command::new("xdg-open")
             .arg(&path)

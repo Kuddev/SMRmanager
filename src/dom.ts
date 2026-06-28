@@ -1,6 +1,9 @@
 // 纯助手函数（无任何模块状态依赖）：HTML 转义、图标、格式化、主题判定等。
 import type { ThemeMode, ThemeName, RuntimeSkill, RuntimeRule, RuntimeMcpServer } from "./types";
 
+// 运行平台判断：macOS 上隐藏 WSL（WSL 仅 Windows）。
+export const IS_MAC = /mac/i.test(navigator.platform);
+
 export function systemPrefersDark(): boolean {
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
 }
